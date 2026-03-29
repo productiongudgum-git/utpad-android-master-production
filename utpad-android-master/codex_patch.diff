@@ -1,0 +1,19 @@
+*** Begin Patch
+*** Update File: app/src/main/java/com/example/gudgum_prod_flow/util/SupabaseInsertUtils.kt
+@@
+-fun isDuplicateKeyConflict(statusCode: Int, responseBody: String): Boolean =
+-    true
++fun isDuplicateKeyConflict(statusCode: Int, responseBody: String): Boolean {
++    val normalized = responseBody.lowercase(Locale.US)
++    return (statusCode == 409 && responseBody.isBlank()) ||
++        normalized.contains("23505") ||
++        normalized.contains("duplicate key value violates unique constraint") ||
++        normalized.contains("duplicate key")
++}
+@@
+-): Boolean =
+-    statusCode in 200..299
++): Boolean =
++    statusCode in 200..299 ||
++        (treatDuplicateAsSuccess && isDuplicateKeyConflict(statusCode, responseBody))
+*** End Patch
