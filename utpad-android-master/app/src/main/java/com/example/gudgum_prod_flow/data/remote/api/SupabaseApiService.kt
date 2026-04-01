@@ -166,4 +166,44 @@ interface SupabaseApiService {
         @Query("select") select: String = "sku_id,batch_code,boxes_available,boxes_returned",
         @Query("boxes_available") boxesFilter: String = "gt.0",
     ): Response<List<Map<String, Any>>>
+
+    // ── Invoices (gg_invoices) — for FIFO dispatch ─────────────────
+    @GET("rest/v1/gg_invoices")
+    suspend fun getActiveInvoices(
+        @Query("is_dispatched") isDispatched: String = "eq.false",
+        @Query("order") order: String = "created_at.desc",
+        @Query("select") select: String = "*",
+    ): Response<List<InvoiceDto>>
+
+    // ── Invoice Items (gg_invoice_items) ────────────────────────────
+    @GET("rest/v1/gg_invoice_items")
+    suspend fun getInvoiceItems(
+        @Query("invoice_id") invoiceId: String,
+        @Query("select") select: String = "*,flavor:gg_flavors(id,name,code)",
+    ): Response<List<InvoiceItemDto>>
+
+    // ── Inventory by flavor for FIFO allocation ────────────────────
+    @GET("rest/v1/inventory_finished_goods")
+    suspend fun getInventoryByFlavor(
+        @Query("sku_id") skuId: String,
+        @Query("units_available") unitsFilter: String = "gt.0",
+        @Query("order") order: String = "updated_at.asc",
+        @Query("select") select: String = "*",
+    ): Response<List<InventoryFinishedGoodDto>>
+
+    // ── Update invoice status ──────────────────────────────────────
+    @PATCH("rest/v1/gg_invoices")
+    suspend fun updateInvoiceStatus(
+        @Query("id") invoiceId: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=minimal",
+    ): Response<Unit>
+
+    // ── Update inventory finished goods ────────────────────────────
+    @PATCH("rest/v1/inventory_finished_goods")
+    suspend fun updateInventory(
+        @Query("id") id: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=minimal",
+    ): Response<Unit>
 }

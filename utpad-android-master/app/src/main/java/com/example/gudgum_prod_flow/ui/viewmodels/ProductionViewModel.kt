@@ -20,6 +20,34 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
+data class BatchSizeConfig(
+    val units: Int,
+    val boxes: Int,
+    val gumsPerBox: Int,
+    val rawMaterialKg: Double,
+    val expectedYieldKg: Double,
+    val label: String,
+)
+
+val BATCH_SIZE_OPTIONS = listOf(
+    BatchSizeConfig(
+        units = 7500,
+        boxes = 500,
+        gumsPerBox = 15,
+        rawMaterialKg = 15.0,
+        expectedYieldKg = 10.5,
+        label = "7,500 Units",
+    ),
+    BatchSizeConfig(
+        units = 10000,
+        boxes = 667,
+        gumsPerBox = 15,
+        rawMaterialKg = 20.0,
+        expectedYieldKg = 14.0,
+        label = "10,000 Units",
+    ),
+)
+
 data class FlavorProfile(val id: String, val name: String, val code: String, val recipeId: String?)
 
 data class RecipeIngredient(
@@ -47,9 +75,14 @@ class ProductionViewModel @Inject constructor(
     private val _batchCode = MutableStateFlow(BatchCodeGenerator.generate())
     val batchCode: StateFlow<String> = _batchCode.asStateFlow()
 
-    // Batch size in kg. Default comes from gg_recipes.yield_factor defined in the dashboard.
-    private val _selectedBatchSizeKg = MutableStateFlow("")
-    val selectedBatchSizeKg: StateFlow<String> = _selectedBatchSizeKg.asStateFlow()
+    // Fixed batch size selection (7,500 or 10,000 units).
+    private val _selectedBatchSize = MutableStateFlow<BatchSizeConfig?>(null)
+    val selectedBatchSize: StateFlow<BatchSizeConfig?> = _selectedBatchSize.asStateFlow()
+
+    // Backward-compatible string representation of batch size in kg.
+    val selectedBatchSizeKg: StateFlow<String> = _selectedBatchSize
+        .map { it?.rawMaterialKg?.let { v -> if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f".format(v) } ?: "" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     private val _manufacturingDate = MutableStateFlow(
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -121,7 +154,6 @@ class ProductionViewModel @Inject constructor(
                             yieldResult.onSuccess { (recipeId, yieldFactor) ->
                                 selectedRecipeId = recipeId
                                 basePlannedYieldKg = yieldFactor
-                                _selectedBatchSizeKg.value = yieldFactor?.formatBatchSize() ?: ""
                                 applyBatchSizeScale()
                             }
                         }
@@ -150,7 +182,6 @@ class ProductionViewModel @Inject constructor(
                 yieldResult.onSuccess { (recipeId, yieldFactor) ->
                     selectedRecipeId = recipeId
                     basePlannedYieldKg = yieldFactor
-                    _selectedBatchSizeKg.value = yieldFactor?.formatBatchSize() ?: ""
                     applyBatchSizeScale()
                 }
             }
@@ -169,28 +200,29 @@ class ProductionViewModel @Inject constructor(
         }
     }
 
-    fun onBatchSizeChanged(value: String) {
-        _selectedBatchSizeKg.value = value
+    fun onBatchSizeSelected(config: BatchSizeConfig) {
+        _selectedBatchSize.value = config
         applyBatchSizeScale()
     }
 
-    /** Scales base recipe quantities proportionally to the dashboard-defined recipe yield. */
+    /** Scales base recipe quantities proportionally using the selected batch size config's raw material kg. */
     private fun applyBatchSizeScale() {
+        val config = _selectedBatchSize.value
         val baseBatchKg = basePlannedYieldKg?.takeIf { it > 0.0 }
-        if (baseBatchKg == null) {
+
+        if (baseBatchKg == null || config == null) {
             _recipe.value = baseRecipeIngredients
-            _plannedYield.value = null
+            _plannedYield.value = config?.expectedYieldKg
             return
         }
 
-        val selectedKg = _selectedBatchSizeKg.value.toDoubleOrNull()?.takeIf { it > 0.0 } ?: baseBatchKg
-        val scale = selectedKg / baseBatchKg
+        val scale = config.rawMaterialKg / baseBatchKg
         _recipe.value = baseRecipeIngredients.map { ing ->
             val baseQty = ing.plannedQty.toDoubleOrNull() ?: 0.0
             val scaledQty = "%.3f".format(baseQty * scale)
             ing.copy(plannedQty = scaledQty, actualQty = scaledQty)
         }
-        _plannedYield.value = selectedKg
+        _plannedYield.value = config.expectedYieldKg
     }
 
     fun onActualQtyChanged(index: Int, value: String) {
@@ -238,6 +270,7 @@ class ProductionViewModel @Inject constructor(
 
             val recipeKey = selectedRecipeId ?: flavor.id
             val actualYieldKg = _actualOutput.value.toDoubleOrNull()
+            val batchConfig = _selectedBatchSize.value
 
             val result = repository.submitBatch(
                 batchCode = batchCode,
@@ -249,6 +282,11 @@ class ProductionViewModel @Inject constructor(
                 plannedYield = _plannedYield.value,
                 actualYield = actualYieldKg,
                 isOnline = isOnline,
+                batchSizeUnits = batchConfig?.units,
+                rawMaterialInput = batchConfig?.rawMaterialKg,
+                expectedYield = batchConfig?.expectedYieldKg,
+                expectedBoxes = batchConfig?.boxes,
+                expectedUnits = batchConfig?.units,
             )
 
             result.onSuccess {
@@ -271,7 +309,7 @@ class ProductionViewModel @Inject constructor(
         baseRecipeIngredients = emptyList()
         basePlannedYieldKg = null
         selectedRecipeId = null
-        _selectedBatchSizeKg.value = ""
+        _selectedBatchSize.value = null
         _plannedYield.value = null
         _actualOutput.value = ""
         _manufacturingDate.value = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -281,6 +319,3 @@ class ProductionViewModel @Inject constructor(
 
     fun clearSubmitState() { _submitState.value = SubmitState.Idle }
 }
-
-private fun Double.formatBatchSize(): String =
-    if (this % 1.0 == 0.0) this.toInt().toString() else "%.1f".format(this)

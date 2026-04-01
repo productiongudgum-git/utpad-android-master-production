@@ -1,10 +1,14 @@
 package com.example.gudgum_prod_flow.data.repository
 
+import android.util.Log
 import com.example.gudgum_prod_flow.data.local.dao.PendingOperationEventDao
 import com.example.gudgum_prod_flow.data.local.entity.PendingOperationEventEntity
 import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
 import com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.GgCustomerDto
+import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
+import com.example.gudgum_prod_flow.data.remote.dto.InvoiceItemDto
+import com.example.gudgum_prod_flow.data.remote.dto.InventoryFinishedGoodDto
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitDispatchEventRequest
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
@@ -19,6 +23,10 @@ class DispatchRepository @Inject constructor(
     private val pendingDao: PendingOperationEventDao,
 ) {
     private val api = SupabaseApiClient.api
+
+    companion object {
+        private const val TAG = "DispatchRepository"
+    }
 
     suspend fun getDispatchedBatches(): Result<List<DispatchedBatchDto>> = withContext(Dispatchers.IO) {
         runCatching {
@@ -36,7 +44,6 @@ class DispatchRepository @Inject constructor(
         }
     }
 
-    /** Fetch open production batches for batch selection */
     suspend fun getOpenBatches(): Result<List<ProductionBatchDto>> = withContext(Dispatchers.IO) {
         runCatching {
             val response = api.getOpenBatches()
@@ -45,62 +52,122 @@ class DispatchRepository @Inject constructor(
         }
     }
 
-    /** Get distinct batch codes from open production batches */
-    suspend fun getOpenBatchCodes(): Result<List<String>> = withContext(Dispatchers.IO) {
+    // ── Invoice-based dispatch methods ───────────────────────────────
+
+    suspend fun getActiveInvoices(): Result<List<InvoiceDto>> = withContext(Dispatchers.IO) {
         runCatching {
-            val response = api.getOpenBatches()
-            if (response.isSuccessful) {
-                response.body()?.map { it.batchCode }?.distinct() ?: emptyList()
-            } else emptyList()
+            val response = api.getActiveInvoices()
+            if (response.isSuccessful) response.body() ?: emptyList()
+            else error("Failed to load invoices: ${response.code()}")
         }
     }
 
-    suspend fun submitDispatch(
-        batchCode: String,
-        skuId: String,
-        customerName: String,
+    suspend fun getInvoiceItems(invoiceId: String): Result<List<InvoiceItemDto>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val response = api.getInvoiceItems(invoiceId = "eq.$invoiceId")
+            if (response.isSuccessful) response.body() ?: emptyList()
+            else error("Failed to load invoice items: ${response.code()}")
+        }
+    }
+
+    suspend fun getInventoryByFlavor(flavorId: String): Result<List<InventoryFinishedGoodDto>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val response = api.getInventoryByFlavor(skuId = "eq.$flavorId")
+            if (response.isSuccessful) response.body() ?: emptyList()
+            else error("Failed to load inventory: ${response.code()}")
+        }
+    }
+
+    /**
+     * Submit a FIFO dispatch: creates dispatch_events for each FIFO allocation line,
+     * deducts inventory, and optionally updates invoice packed/dispatched status.
+     */
+    suspend fun submitFifoDispatch(
+        invoiceId: String,
         invoiceNumber: String,
-        quantityDispatched: Int,
+        customerName: String,
+        flavorId: String,
+        allocations: List<FifoAllocation>,
+        isPacked: Boolean,
+        isDispatched: Boolean,
         dispatchDate: String,
         workerId: String,
         isOnline: Boolean,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         if (isOnline) {
             runCatching {
-                val response = api.insertDispatchEvent(
-                    SubmitDispatchEventRequest(
-                        batchCode = batchCode,
-                        skuId = skuId,
-                        boxesDispatched = quantityDispatched,
-                        customerName = customerName.ifBlank { null },
+                // 1. Create dispatch events for each FIFO allocation line
+                for (alloc in allocations) {
+                    val request = SubmitDispatchEventRequest(
+                        batchCode = alloc.batchCode,
+                        skuId = flavorId,
+                        boxesDispatched = alloc.unitsToTake / 15,
+                        customerName = customerName,
                         invoiceNumber = invoiceNumber,
                         dispatchDate = dispatchDate,
                         workerId = workerId,
+                        invoiceId = invoiceId,
+                        unitsDispatched = alloc.unitsToTake,
+                        flavorId = flavorId,
+                        isPacked = isPacked,
+                        isDispatched = isDispatched,
                     )
-                )
-                if (!response.isSuccessful && response.code() != 201) {
-                    val body = response.errorBody()?.string() ?: ""
-                    error("Dispatch insert failed: ${response.code()} | $body")
+                    val response = api.insertDispatchEvent(request)
+                    if (!response.isSuccessful && response.code() != 201) {
+                        val body = response.errorBody()?.string() ?: ""
+                        Log.e(TAG, "Dispatch insert failed for batch ${alloc.batchCode}: ${response.code()} $body")
+                        error("Failed to create dispatch for batch ${alloc.batchCode}")
+                    }
+
+                    // 2. Deduct units from inventory
+                    val newUnits = alloc.availableUnits - alloc.unitsToTake
+                    val updateResp = api.updateInventory(
+                        id = "eq.${alloc.inventoryId}",
+                        body = mapOf("units_available" to newUnits),
+                    )
+                    if (!updateResp.isSuccessful) {
+                        Log.w(TAG, "Inventory update failed for ${alloc.inventoryId}: ${updateResp.code()}")
+                    }
+                }
+
+                // 3. Update invoice status
+                val statusBody = mutableMapOf<String, Any?>()
+                if (isPacked) {
+                    statusBody["is_packed"] = true
+                    statusBody["packed_at"] = java.time.Instant.now().toString()
+                }
+                if (isDispatched) {
+                    statusBody["is_dispatched"] = true
+                    statusBody["dispatched_at"] = java.time.Instant.now().toString()
+                }
+                if (statusBody.isNotEmpty()) {
+                    api.updateInvoiceStatus(
+                        invoiceId = "eq.$invoiceId",
+                        body = statusBody,
+                    )
                 }
             }
         } else {
             runCatching {
+                val totalUnits = allocations.sumOf { it.unitsToTake }
                 pendingDao.insertEvent(
                     PendingOperationEventEntity(
                         module = "dispatch",
                         workerId = workerId,
                         workerName = WorkerIdentityStore.workerName,
                         workerRole = WorkerIdentityStore.workerRole,
-                        batchCode = batchCode,
-                        quantity = quantityDispatched.toDouble(),
-                        unit = "boxes",
-                        summary = "Dispatch queued — $quantityDispatched boxes for batch $batchCode",
+                        batchCode = allocations.firstOrNull()?.batchCode ?: "",
+                        quantity = totalUnits.toDouble(),
+                        unit = "units",
+                        summary = "FIFO dispatch queued — $totalUnits units for invoice $invoiceNumber",
                         payloadJson = JSONObject().apply {
-                            put("batch_code", batchCode)
-                            put("sku_id", skuId)
-                            put("customer_name", customerName)
+                            put("invoice_id", invoiceId)
                             put("invoice_number", invoiceNumber)
-                            put("quantity_dispatched", quantityDispatched)
+                            put("customer_name", customerName)
+                            put("flavor_id", flavorId)
+                            put("total_units", totalUnits)
+                            put("is_packed", isPacked)
+                            put("is_dispatched", isDispatched)
                             put("dispatch_date", dispatchDate)
                         }.toString(),
                     )
@@ -108,4 +175,42 @@ class DispatchRepository @Inject constructor(
             }
         }
     }
+
+    /** Toggle packed/dispatched status on an invoice */
+    suspend fun updateInvoiceStatus(
+        invoiceId: String,
+        isPacked: Boolean? = null,
+        isDispatched: Boolean? = null,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = mutableMapOf<String, Any?>()
+            if (isPacked != null) {
+                body["is_packed"] = isPacked
+                if (isPacked) body["packed_at"] = java.time.Instant.now().toString()
+            }
+            if (isDispatched != null) {
+                body["is_dispatched"] = isDispatched
+                if (isDispatched) body["dispatched_at"] = java.time.Instant.now().toString()
+            }
+            if (body.isNotEmpty()) {
+                val response = api.updateInvoiceStatus(
+                    invoiceId = "eq.$invoiceId",
+                    body = body,
+                )
+                if (!response.isSuccessful) {
+                    error("Failed to update invoice status: ${response.code()}")
+                }
+            }
+        }
+    }
 }
+
+/** A single FIFO allocation line: which inventory row to take how many units from */
+data class FifoAllocation(
+    val inventoryId: String,
+    val batchCode: String,
+    val availableUnits: Int,
+    val unitsToTake: Int,
+)
+
+private val WorkerIdentityStore get() = com.example.gudgum_prod_flow.data.session.WorkerIdentityStore

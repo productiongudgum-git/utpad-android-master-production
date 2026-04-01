@@ -69,6 +69,7 @@ import com.example.gudgum_prod_flow.ui.theme.UtpadBackground
 import com.example.gudgum_prod_flow.ui.theme.UtpadSurface
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,7 +83,7 @@ fun ProductionScreen(
 ) {
     val selectedFlavor by viewModel.selectedFlavor.collectAsState()
     val batchCode by viewModel.batchCode.collectAsState()
-    val selectedBatchSizeKg by viewModel.selectedBatchSizeKg.collectAsState()
+    val selectedBatchSize by viewModel.selectedBatchSize.collectAsState()
     val recipe by viewModel.recipe.collectAsState()
     val expectedYield by viewModel.expectedYield.collectAsState()
     val manufacturingDate by viewModel.manufacturingDate.collectAsState()
@@ -195,7 +196,7 @@ fun ProductionScreen(
                             )
                         }
 
-                        // Batch Size input
+                        // Batch Size selection cards
                         Column {
                             Text(
                                 text = "BATCH SIZE",
@@ -204,28 +205,53 @@ fun ProductionScreen(
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = selectedBatchSizeKg,
-                                onValueChange = { viewModel.onBatchSizeChanged(it) },
-                                placeholder = { Text("Defined from dashboard recipe", color = UtpadTextSecondary) },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                suffix = { Text("kg", color = UtpadTextSecondary) },
-                                singleLine = true,
+                            Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = UtpadPrimary,
-                                    unfocusedBorderColor = UtpadOutline,
-                                    focusedContainerColor = UtpadBackground,
-                                    unfocusedContainerColor = UtpadSurface,
-                                ),
-                                shape = RoundedCornerShape(16.dp),
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Auto-filled from the recipe set in the dashboard. When the admin updates the recipe batch size, this value refreshes from Supabase.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = UtpadTextSecondary,
-                            )
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                com.example.gudgum_prod_flow.ui.viewmodels.BATCH_SIZE_OPTIONS.forEach { config ->
+                                    val isSelected = selectedBatchSize == config
+                                    Surface(
+                                        onClick = { viewModel.onBatchSizeSelected(config) },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(16.dp),
+                                        color = if (isSelected) UtpadPrimary.copy(alpha = 0.1f) else UtpadBackground,
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            width = if (isSelected) 2.dp else 1.dp,
+                                            color = if (isSelected) UtpadPrimary else UtpadOutline,
+                                        ),
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                        ) {
+                                            Text(
+                                                text = config.label,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isSelected) UtpadPrimary else UtpadTextPrimary,
+                                            )
+                                            Text(
+                                                text = "${config.boxes} boxes",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = UtpadTextSecondary,
+                                            )
+                                            Text(
+                                                text = "${config.rawMaterialKg.toInt()} kg input",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = UtpadTextSecondary,
+                                            )
+                                            Text(
+                                                text = "${config.expectedYieldKg} kg yield",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (isSelected) UtpadPrimary else UtpadTextSecondary,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         // Batch Code (read-only)

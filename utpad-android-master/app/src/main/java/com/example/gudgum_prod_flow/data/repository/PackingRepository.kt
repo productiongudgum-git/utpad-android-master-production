@@ -1,7 +1,9 @@
 package com.example.gudgum_prod_flow.data.repository
 
 import android.util.Log
+import com.example.gudgum_prod_flow.data.local.dao.CachedFlavorDao
 import com.example.gudgum_prod_flow.data.local.dao.PendingOperationEventDao
+import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
 import com.example.gudgum_prod_flow.data.local.entity.PendingOperationEventEntity
 import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
 import com.example.gudgum_prod_flow.data.remote.dto.PackingSessionDto
@@ -10,6 +12,7 @@ import com.example.gudgum_prod_flow.data.remote.dto.SubmitPackingSessionRequest
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
 import com.example.gudgum_prod_flow.util.isDuplicateKeyConflict
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import javax.inject.Inject
@@ -18,12 +21,15 @@ import javax.inject.Singleton
 @Singleton
 class PackingRepository @Inject constructor(
     private val pendingDao: PendingOperationEventDao,
+    private val flavorDao: CachedFlavorDao,
 ) {
     private val api = SupabaseApiClient.api
 
     companion object {
         private const val TAG = "PackingRepository"
     }
+
+    fun getActiveFlavors(): Flow<List<CachedFlavorEntity>> = flavorDao.getActiveFlavors()
 
     suspend fun getOpenBatches(): Result<List<ProductionBatchDto>> = withContext(Dispatchers.IO) {
         runCatching {
@@ -51,6 +57,8 @@ class PackingRepository @Inject constructor(
         batchCode: String,
         flavorId: String?,
         boxesPacked: Int,
+        kgsPacked: Double?,
+        unitsPacked: Int?,
         packingDate: String,
         workerId: String,
         isOnline: Boolean,
@@ -63,6 +71,8 @@ class PackingRepository @Inject constructor(
                     sessionDate = packingDate,
                     workerId = workerId,
                     boxesPacked = boxesPacked,
+                    kgsPacked = kgsPacked,
+                    unitsPacked = unitsPacked,
                 )
 
                 val existingSession = findExistingSession(batchCode, flavorId, packingDate)
@@ -103,6 +113,8 @@ class PackingRepository @Inject constructor(
                             put("batch_code", batchCode)
                             put("flavor_id", flavorId ?: JSONObject.NULL)
                             put("boxes_packed", boxesPacked)
+                            put("kgs_packed", kgsPacked ?: JSONObject.NULL)
+                            put("units_packed", unitsPacked ?: JSONObject.NULL)
                             put("session_date", packingDate)
                         }.toString(),
                     )

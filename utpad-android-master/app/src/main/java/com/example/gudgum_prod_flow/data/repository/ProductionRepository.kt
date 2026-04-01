@@ -127,6 +127,11 @@ class ProductionRepository @Inject constructor(
         plannedYield: Double?,
         actualYield: Double?,
         isOnline: Boolean,
+        batchSizeUnits: Int? = null,
+        rawMaterialInput: Double? = null,
+        expectedYield: Double? = null,
+        expectedBoxes: Int? = null,
+        expectedUnits: Int? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         if (isOnline) {
             runCatching {
@@ -139,6 +144,11 @@ class ProductionRepository @Inject constructor(
                     workerId = workerId,
                     plannedYield = plannedYield,
                     actualYield = actualYield,
+                    batchSizeUnits = batchSizeUnits,
+                    rawMaterialInput = rawMaterialInput,
+                    expectedYield = expectedYield,
+                    expectedBoxes = expectedBoxes,
+                    expectedUnits = expectedUnits,
                 )
 
                 Log.d(TAG, "Saving production batch batch_code=$batchCode flavor_id=$skuId recipe_id=$recipeId")
@@ -174,6 +184,11 @@ class ProductionRepository @Inject constructor(
                     put("production_date", productionDate)
                     put("planned_yield", plannedYield ?: JSONObject.NULL)
                     put("actual_yield", actualYield ?: JSONObject.NULL)
+                    put("batch_size_units", batchSizeUnits ?: JSONObject.NULL)
+                    put("raw_material_input", rawMaterialInput ?: JSONObject.NULL)
+                    put("expected_yield", expectedYield ?: JSONObject.NULL)
+                    put("expected_boxes", expectedBoxes ?: JSONObject.NULL)
+                    put("expected_units", expectedUnits ?: JSONObject.NULL)
                 }
                 pendingDao.insertEvent(
                     PendingOperationEventEntity(

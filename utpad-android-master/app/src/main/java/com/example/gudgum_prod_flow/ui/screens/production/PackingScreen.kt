@@ -81,6 +81,8 @@ fun PackingScreen(
     val batchCode by viewModel.batchCode.collectAsState()
     val batchCodes by viewModel.batchCodes.collectAsState()
     val batchCodesLoading by viewModel.batchCodesLoading.collectAsState()
+    val flavors by viewModel.flavors.collectAsState()
+    val selectedFlavor by viewModel.selectedFlavor.collectAsState()
     val qtyPacked by viewModel.qtyPacked.collectAsState()
     val boxesMade by viewModel.boxesMade.collectAsState()
     val packingDate by viewModel.packingDate.collectAsState()
@@ -88,6 +90,8 @@ fun PackingScreen(
     val shiftSummary by viewModel.shiftSummary.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
     val currentStep by viewModel.currentWizardStep.collectAsState()
+
+    val unitsPacked = boxesMade.toIntOrNull()?.let { it * 15 }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -227,7 +231,7 @@ fun PackingScreen(
                         }
                     }
 
-                    // ── Step 2: Qty Packed, Boxes Made, Packing Date ──
+                    // ── Step 2: Flavour, KGs, Boxes, Packing Date ──
                     2 -> {
                         Card(
                             shape = RoundedCornerShape(24.dp),
@@ -238,13 +242,31 @@ fun PackingScreen(
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(14.dp),
                             ) {
+                                // Flavour dropdown
+                                Column {
+                                    Text(
+                                        text = "FLAVOUR",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = UtpadTextSecondary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    SearchableDropdown(
+                                        items = flavors,
+                                        selectedItem = selectedFlavor,
+                                        onItemSelected = { viewModel.onFlavorSelected(it) },
+                                        itemLabel = { it.name },
+                                        placeholder = "Select flavour...",
+                                    )
+                                }
+
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "QTY PACKED",
+                                            text = "KGS PACKED",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = UtpadTextSecondary,
                                             fontWeight = FontWeight.SemiBold
@@ -290,6 +312,22 @@ fun PackingScreen(
                                                 unfocusedContainerColor = UtpadSurface,
                                             ),
                                             shape = RoundedCornerShape(16.dp),
+                                        )
+                                    }
+                                }
+
+                                // Auto-computed units display
+                                if (unitsPacked != null && unitsPacked > 0) {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = UtpadPrimary.copy(alpha = 0.1f),
+                                    ) {
+                                        Text(
+                                            text = "= $unitsPacked units (${boxesMade} boxes × 15 gums/box)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = UtpadPrimary,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                         )
                                     }
                                 }
@@ -377,7 +415,7 @@ fun PackingScreen(
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "Batch: $batchCode — ${qtyPacked}kg in ${boxesMade} boxes on $packingDate",
+                                        text = "Batch: $batchCode\nFlavour: ${selectedFlavor?.name ?: "—"}\n${qtyPacked}kg in ${boxesMade} boxes (${unitsPacked ?: 0} units) on $packingDate",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = UtpadTextPrimary,
                                     )

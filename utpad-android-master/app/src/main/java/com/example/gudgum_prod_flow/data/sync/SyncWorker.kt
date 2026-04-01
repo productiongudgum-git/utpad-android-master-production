@@ -107,12 +107,16 @@ class SyncWorker @AssistedInject constructor(
             val payload = JSONObject(payloadJson)
             val flavorId = if (payload.isNull("flavor_id")) null else payload.getString("flavor_id")
             val sessionDate = payload.getString("session_date")
+            val kgsPacked = if (payload.isNull("kgs_packed")) null else payload.optDouble("kgs_packed")
+            val unitsPacked = if (payload.isNull("units_packed")) null else payload.optInt("units_packed")
             val request = SubmitPackingSessionRequest(
                 batchCode = batchCode,
                 flavorId = flavorId,
                 sessionDate = sessionDate,
                 workerId = workerId,
                 boxesPacked = payload.getInt("boxes_packed"),
+                kgsPacked = kgsPacked,
+                unitsPacked = unitsPacked,
             )
 
             val existing = SupabaseApiClient.api.findPackingSession(

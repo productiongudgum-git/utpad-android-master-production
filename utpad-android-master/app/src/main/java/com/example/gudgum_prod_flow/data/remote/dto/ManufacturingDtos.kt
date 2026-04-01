@@ -44,6 +44,11 @@ data class SubmitProductionBatchRequest(
     @SerialName("planned_yield") val plannedYield: Double? = null,
     @SerialName("actual_yield") val actualYield: Double? = null,
     val status: String = "open",
+    @SerialName("batch_size_units") val batchSizeUnits: Int? = null,
+    @SerialName("raw_material_input") val rawMaterialInput: Double? = null,
+    @SerialName("expected_yield") val expectedYield: Double? = null,
+    @SerialName("expected_boxes") val expectedBoxes: Int? = null,
+    @SerialName("expected_units") val expectedUnits: Int? = null,
 )
 
 @Serializable
@@ -78,6 +83,8 @@ data class SubmitPackingSessionRequest(
     @SerialName("session_date") val sessionDate: String,
     @SerialName("worker_id") val workerId: String,
     @SerialName("boxes_packed") val boxesPacked: Int,
+    @SerialName("kgs_packed") val kgsPacked: Double? = null,
+    @SerialName("units_packed") val unitsPacked: Int? = null,
 )
 
 @Serializable
@@ -88,6 +95,8 @@ data class PackingSessionDto(
     @SerialName("session_date") val sessionDate: String,
     @SerialName("worker_id") val workerId: String? = null,
     @SerialName("boxes_packed") val boxesPacked: Int = 0,
+    @SerialName("kgs_packed") val kgsPacked: Double? = null,
+    @SerialName("units_packed") val unitsPacked: Int? = null,
     @SerialName("created_at") val createdAt: String? = null,
 )
 
@@ -101,6 +110,11 @@ data class SubmitDispatchEventRequest(
     @SerialName("invoice_number") val invoiceNumber: String,
     @SerialName("dispatch_date") val dispatchDate: String,
     @SerialName("worker_id") val workerId: String,
+    @SerialName("invoice_id") val invoiceId: String? = null,
+    @SerialName("units_dispatched") val unitsDispatched: Int = 0,
+    @SerialName("flavor_id") val flavorId: String? = null,
+    @SerialName("is_packed") val isPacked: Boolean = false,
+    @SerialName("is_dispatched") val isDispatched: Boolean = false,
 )
 
 @Serializable
@@ -111,6 +125,38 @@ data class DispatchedBatchDto(
     @SerialName("dispatch_date") val dispatchDate: String,
     @SerialName("customer_name") val customerName: String? = null,
     val sku: FlavorJoinDto? = null,
+)
+
+// ── Invoices (gg_invoices) ─────────────────────────────────────────
+@Serializable
+data class InvoiceDto(
+    val id: String,
+    @SerialName("invoice_number") val invoiceNumber: String,
+    @SerialName("customer_id") val customerId: String? = null,
+    @SerialName("customer_name") val customerName: String,
+    @SerialName("is_packed") val isPacked: Boolean = false,
+    @SerialName("is_dispatched") val isDispatched: Boolean = false,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+// ── Invoice Items (gg_invoice_items) ───────────────────────────────
+@Serializable
+data class InvoiceItemDto(
+    val id: String,
+    @SerialName("invoice_id") val invoiceId: String,
+    @SerialName("flavor_id") val flavorId: String,
+    @SerialName("quantity_units") val quantityUnits: Int,
+    val flavor: FlavorJoinDto? = null,
+)
+
+// ── Inventory Finished Goods (inventory_finished_goods) ────────────
+@Serializable
+data class InventoryFinishedGoodDto(
+    val id: String,
+    @SerialName("sku_id") val skuId: String,
+    @SerialName("batch_code") val batchCode: String,
+    @SerialName("units_available") val unitsAvailable: Int = 0,
+    @SerialName("boxes_available") val boxesAvailable: Int = 0,
 )
 
 // ── Inwarding (gg_inwarding) ───────────────────────────────────────
