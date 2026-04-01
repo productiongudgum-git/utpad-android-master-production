@@ -127,7 +127,14 @@ data class DispatchedBatchDto(
     val sku: FlavorJoinDto? = null,
 )
 
-// ── Invoices (gg_invoices) ─────────────────────────────────────────
+// ── Invoices (gg_invoices) — items stored as JSON column ──────────
+@Serializable
+data class InvoiceItemJson(
+    @SerialName("flavor_id") val flavorId: String = "",
+    @SerialName("flavor_name") val flavorName: String = "Unknown",
+    @SerialName("quantity_units") val quantityUnits: Int = 0,
+)
+
 @Serializable
 data class InvoiceDto(
     val id: String,
@@ -137,13 +144,14 @@ data class InvoiceDto(
     @SerialName("is_packed") val isPacked: Boolean = false,
     @SerialName("is_dispatched") val isDispatched: Boolean = false,
     @SerialName("created_at") val createdAt: String? = null,
+    val items: List<InvoiceItemJson> = emptyList(),
 )
 
-// ── Invoice Items (gg_invoice_items) ───────────────────────────────
+// ── Invoice Items (derived from gg_invoices.items JSON) ───────────
 @Serializable
 data class InvoiceItemDto(
-    val id: String,
-    @SerialName("invoice_id") val invoiceId: String,
+    val id: String = "",
+    @SerialName("invoice_id") val invoiceId: String = "",
     @SerialName("flavor_id") val flavorId: String,
     @SerialName("quantity_units") val quantityUnits: Int,
     val flavor: FlavorJoinDto? = null,

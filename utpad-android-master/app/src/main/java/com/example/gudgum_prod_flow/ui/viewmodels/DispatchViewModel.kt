@@ -118,16 +118,23 @@ class DispatchViewModel @Inject constructor(
 
     fun onInvoiceSelected(invoice: InvoiceDto) {
         _selectedInvoice.value = invoice
-        _invoiceItems.value = emptyList()
         _selectedItem.value = null
         _fifoLines.value = emptyList()
         _unitsToDispatch.value = ""
 
-        viewModelScope.launch {
-            val result = repository.getInvoiceItems(invoice.id)
-            result.onSuccess { items ->
-                _invoiceItems.value = items
-            }
+        // Parse items from invoice's JSON items column (no separate table)
+        _invoiceItems.value = invoice.items.map { jsonItem ->
+            InvoiceItemDto(
+                id = "",
+                invoiceId = invoice.id,
+                flavorId = jsonItem.flavorId,
+                quantityUnits = jsonItem.quantityUnits,
+                flavor = com.example.gudgum_prod_flow.data.remote.dto.FlavorJoinDto(
+                    id = jsonItem.flavorId,
+                    name = jsonItem.flavorName,
+                    code = "",
+                ),
+            )
         }
     }
 
