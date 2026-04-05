@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
+import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
 import com.example.gudgum_prod_flow.data.repository.PackingRepository
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -36,7 +37,7 @@ data class BatchFlavorOption(
 @HiltViewModel
 class PackingViewModel @Inject constructor(
     private val repository: PackingRepository,
-    private val realtimeManager: com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager,
+    private val realtimeManager: SupabaseRealtimeManager,
 ) : ViewModel() {
 
     // Batch+flavor options from open production batches

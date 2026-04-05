@@ -7,7 +7,6 @@ import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
 import com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.GgCustomerDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
-import com.example.gudgum_prod_flow.data.remote.dto.InvoiceItemDto
 import com.example.gudgum_prod_flow.data.remote.dto.InventoryFinishedGoodDto
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitDispatchEventRequest
@@ -59,14 +58,6 @@ class DispatchRepository @Inject constructor(
             val response = api.getActiveInvoices()
             if (response.isSuccessful) response.body() ?: emptyList()
             else error("Failed to load invoices: ${response.code()}")
-        }
-    }
-
-    suspend fun getInvoiceItems(invoiceId: String): Result<List<InvoiceItemDto>> = withContext(Dispatchers.IO) {
-        runCatching {
-            val response = api.getInvoiceItems(invoiceId = "eq.$invoiceId")
-            if (response.isSuccessful) response.body() ?: emptyList()
-            else error("Failed to load invoice items: ${response.code()}")
         }
     }
 

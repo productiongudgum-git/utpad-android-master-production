@@ -2,9 +2,11 @@ package com.example.gudgum_prod_flow.ui.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.gudgum_prod_flow.data.remote.dto.FlavorJoinDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceItemDto
 import com.example.gudgum_prod_flow.data.remote.dto.InventoryFinishedGoodDto
+import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
 import com.example.gudgum_prod_flow.data.repository.DispatchRepository
 import com.example.gudgum_prod_flow.data.repository.FifoAllocation
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
@@ -29,7 +31,7 @@ data class FifoDisplayLine(
 @HiltViewModel
 class DispatchViewModel @Inject constructor(
     private val repository: DispatchRepository,
-    private val realtimeManager: com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager,
+    private val realtimeManager: SupabaseRealtimeManager,
 ) : ViewModel() {
 
     // ── Step 1: Invoice selection ──────────────────────────────────
@@ -129,7 +131,7 @@ class DispatchViewModel @Inject constructor(
                 invoiceId = invoice.id,
                 flavorId = jsonItem.flavorId,
                 quantityUnits = jsonItem.quantityUnits,
-                flavor = com.example.gudgum_prod_flow.data.remote.dto.FlavorJoinDto(
+                flavor = FlavorJoinDto(
                     id = jsonItem.flavorId,
                     name = jsonItem.flavorName,
                     code = "",

@@ -3,6 +3,8 @@ package com.example.gudgum_prod_flow.ui.viewmodels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
+import com.example.gudgum_prod_flow.domain.model.AuthResult
+import com.example.gudgum_prod_flow.domain.usecase.LoginUseCase
 import com.example.gudgum_prod_flow.ui.navigation.AppRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,7 +30,7 @@ sealed class LoginState {
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
-    private val loginUseCase: com.example.gudgum_prod_flow.domain.usecase.LoginUseCase
+    private val loginUseCase: LoginUseCase
 ) : ViewModel() {
 
     private val _phone = MutableStateFlow("")
@@ -76,7 +78,7 @@ class AuthViewModel @Inject constructor(
             _loginState.value = LoginState.Loading
 
             when (val result = loginUseCase(_phone.value)) {
-                is com.example.gudgum_prod_flow.domain.model.AuthResult.Success -> {
+                is AuthResult.Success -> {
                     val user = result.user
                     val allowedRoutes = routesForModules(user.allowedModules, user.role)
                     val homeRoute = allowedRoutes.firstOrNull()
@@ -106,7 +108,7 @@ class AuthViewModel @Inject constructor(
                         authorizedRoute = homeRoute,
                     )
                 }
-                is com.example.gudgum_prod_flow.domain.model.AuthResult.Error -> {
+                is AuthResult.Error -> {
                     _loginState.value = LoginState.Error(result.message)
                 }
             }

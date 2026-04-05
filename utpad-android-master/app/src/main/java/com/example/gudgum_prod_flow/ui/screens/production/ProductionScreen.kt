@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.gudgum_prod_flow.ui.components.SearchableDropdown
 import com.example.gudgum_prod_flow.ui.navigation.AppRoute
+import com.example.gudgum_prod_flow.ui.viewmodels.BATCH_SIZE_OPTIONS
 import com.example.gudgum_prod_flow.ui.viewmodels.ProductionViewModel
 import com.example.gudgum_prod_flow.ui.viewmodels.SubmitState
 import com.example.gudgum_prod_flow.ui.theme.UtpadPrimary
@@ -209,14 +210,14 @@ fun ProductionScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                com.example.gudgum_prod_flow.ui.viewmodels.BATCH_SIZE_OPTIONS.forEach { config ->
+                                BATCH_SIZE_OPTIONS.forEach { config ->
                                     val isSelected = selectedBatchSize == config
                                     Surface(
                                         onClick = { viewModel.onBatchSizeSelected(config) },
                                         modifier = Modifier.weight(1f),
                                         shape = RoundedCornerShape(16.dp),
                                         color = if (isSelected) UtpadPrimary.copy(alpha = 0.1f) else UtpadBackground,
-                                        border = androidx.compose.foundation.BorderStroke(
+                                        border = BorderStroke(
                                             width = if (isSelected) 2.dp else 1.dp,
                                             color = if (isSelected) UtpadPrimary else UtpadOutline,
                                         ),

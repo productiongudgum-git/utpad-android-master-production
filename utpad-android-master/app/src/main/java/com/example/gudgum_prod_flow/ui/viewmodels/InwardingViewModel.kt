@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.local.entity.CachedIngredientEntity
 import com.example.gudgum_prod_flow.data.remote.dto.GgInwardingRequest
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitReturnEventRequest
+import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
+import com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto
 import com.example.gudgum_prod_flow.data.repository.DispatchRepository
 import com.example.gudgum_prod_flow.data.repository.InwardingRepository
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
@@ -28,7 +30,7 @@ class InwardingViewModel @Inject constructor(
     application: Application,
     private val repository: InwardingRepository,
     private val dispatchRepository: DispatchRepository,
-    private val realtimeManager: com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager,
+    private val realtimeManager: SupabaseRealtimeManager,
 ) : AndroidViewModel(application) {
     private companion object {
         const val TAG = "InwardingViewModel"
@@ -94,8 +96,8 @@ class InwardingViewModel @Inject constructor(
     private val _returnsMode = MutableStateFlow(false)
     val returnsMode: StateFlow<Boolean> = _returnsMode.asStateFlow()
 
-    private val _dispatchedBatches = MutableStateFlow<List<com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto>>(emptyList())
-    val dispatchedBatches: StateFlow<List<com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto>> = _dispatchedBatches.asStateFlow()
+    private val _dispatchedBatches = MutableStateFlow<List<DispatchedBatchDto>>(emptyList())
+    val dispatchedBatches: StateFlow<List<DispatchedBatchDto>> = _dispatchedBatches.asStateFlow()
 
     private val _selectedReturnBatch = MutableStateFlow("")
     val selectedReturnBatch: StateFlow<String> = _selectedReturnBatch.asStateFlow()

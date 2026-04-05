@@ -175,13 +175,6 @@ interface SupabaseApiService {
         @Query("select") select: String = "*",
     ): Response<List<InvoiceDto>>
 
-    // ── Invoice Items (gg_invoice_items) ────────────────────────────
-    @GET("rest/v1/gg_invoice_items")
-    suspend fun getInvoiceItems(
-        @Query("invoice_id") invoiceId: String,
-        @Query("select") select: String = "*,flavor:gg_flavors(id,name,code)",
-    ): Response<List<InvoiceItemDto>>
-
     // ── Inventory by flavor for FIFO allocation ────────────────────
     @GET("rest/v1/inventory_finished_goods")
     suspend fun getInventoryByFlavor(

@@ -147,13 +147,12 @@ data class InvoiceDto(
     val items: List<InvoiceItemJson> = emptyList(),
 )
 
-// ── Invoice Items (derived from gg_invoices.items JSON) ───────────
-@Serializable
+// ── Invoice Items (constructed from gg_invoices.items JSON, not a DB table) ──
 data class InvoiceItemDto(
     val id: String = "",
-    @SerialName("invoice_id") val invoiceId: String = "",
-    @SerialName("flavor_id") val flavorId: String,
-    @SerialName("quantity_units") val quantityUnits: Int,
+    val invoiceId: String = "",
+    val flavorId: String,
+    val quantityUnits: Int,
     val flavor: FlavorJoinDto? = null,
 )
 

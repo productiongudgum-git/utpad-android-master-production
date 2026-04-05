@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
 import com.example.gudgum_prod_flow.data.local.entity.CachedRecipeLineEntity
+import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
 import com.example.gudgum_prod_flow.data.repository.ProductionRepository
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
 import com.example.gudgum_prod_flow.util.BatchCodeGenerator
@@ -63,7 +64,7 @@ data class RecipeIngredient(
 @HiltViewModel
 class ProductionViewModel @Inject constructor(
     private val repository: ProductionRepository,
-    private val realtimeManager: com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager,
+    private val realtimeManager: SupabaseRealtimeManager,
 ) : ViewModel() {
 
     private val _flavors = MutableStateFlow<List<FlavorProfile>>(emptyList())
