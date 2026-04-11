@@ -104,15 +104,14 @@ data class PackingSessionDto(
 @Serializable
 data class SubmitDispatchEventRequest(
     @SerialName("batch_code") val batchCode: String,
-    @SerialName("sku_id") val skuId: String,
-    @SerialName("boxes_dispatched") val boxesDispatched: Int,
+    @SerialName("flavor_id") val flavorId: String,
+    @SerialName("invoice_id") val invoiceId: String? = null,
     @SerialName("customer_name") val customerName: String? = null,
     @SerialName("invoice_number") val invoiceNumber: String,
     @SerialName("dispatch_date") val dispatchDate: String,
     @SerialName("worker_id") val workerId: String,
-    @SerialName("invoice_id") val invoiceId: String? = null,
+    @SerialName("boxes_dispatched") val boxesDispatched: Int,
     @SerialName("units_dispatched") val unitsDispatched: Int = 0,
-    @SerialName("flavor_id") val flavorId: String? = null,
     @SerialName("is_packed") val isPacked: Boolean = false,
     @SerialName("is_dispatched") val isDispatched: Boolean = false,
 )
@@ -120,7 +119,7 @@ data class SubmitDispatchEventRequest(
 @Serializable
 data class DispatchedBatchDto(
     @SerialName("batch_code") val batchCode: String,
-    @SerialName("sku_id") val skuId: String,
+    @SerialName("flavor_id") val skuId: String,
     @SerialName("boxes_dispatched") val boxesDispatched: Int,
     @SerialName("dispatch_date") val dispatchDate: String,
     @SerialName("customer_name") val customerName: String? = null,

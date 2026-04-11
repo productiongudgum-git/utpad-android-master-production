@@ -140,7 +140,7 @@ interface SupabaseApiService {
 
     @GET("rest/v1/dispatch_events")
     suspend fun getDispatchedBatches(
-        @Query("select") select: String = "batch_code,sku_id,boxes_dispatched,dispatch_date,customer_name,sku:gg_flavors(name)",
+        @Query("select") select: String = "batch_code,flavor_id,boxes_dispatched,dispatch_date,customer_name,sku:gg_flavors!dispatch_events_flavor_id_fkey(name)",
         @Query("order") order: String = "dispatch_date.desc",
         @Query("limit") limit: Int = 50,
     ): Response<List<DispatchedBatchDto>>

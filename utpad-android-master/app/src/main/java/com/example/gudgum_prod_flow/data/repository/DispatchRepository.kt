@@ -91,15 +91,14 @@ class DispatchRepository @Inject constructor(
                 for (alloc in allocations) {
                     val request = SubmitDispatchEventRequest(
                         batchCode = alloc.batchCode,
-                        skuId = flavorId,
-                        boxesDispatched = alloc.unitsToTake / 15,
+                        flavorId = flavorId,
+                        invoiceId = invoiceId,
                         customerName = customerName,
                         invoiceNumber = invoiceNumber,
                         dispatchDate = dispatchDate,
                         workerId = workerId,
-                        invoiceId = invoiceId,
+                        boxesDispatched = alloc.unitsToTake / 15,
                         unitsDispatched = alloc.unitsToTake,
-                        flavorId = flavorId,
                         isPacked = isPacked,
                         isDispatched = isDispatched,
                     )

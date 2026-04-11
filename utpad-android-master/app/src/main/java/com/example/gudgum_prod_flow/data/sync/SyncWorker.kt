@@ -148,15 +148,21 @@ class SyncWorker @AssistedInject constructor(
     private suspend fun syncDispatchEvents(payloadJson: String, workerId: String): Boolean {
         return try {
             val payload = JSONObject(payloadJson)
+            val flavorId = payload.getString("flavor_id")
+            val totalUnits = payload.optInt("total_units", 0)
             val resp = SupabaseApiClient.api.insertDispatchEvent(
                 SubmitDispatchEventRequest(
-                    batchCode = payload.getString("batch_code"),
-                    skuId = payload.getString("sku_id"),
-                    boxesDispatched = payload.getInt("quantity_dispatched"),
+                    batchCode = payload.optString("batch_code", ""),
+                    flavorId = flavorId,
+                    invoiceId = if (payload.isNull("invoice_id")) null else payload.getString("invoice_id"),
                     customerName = if (payload.isNull("customer_name")) null else payload.getString("customer_name"),
                     invoiceNumber = payload.optString("invoice_number", ""),
                     dispatchDate = payload.getString("dispatch_date"),
                     workerId = workerId,
+                    boxesDispatched = totalUnits / 15,
+                    unitsDispatched = totalUnits,
+                    isPacked = payload.optBoolean("is_packed", false),
+                    isDispatched = payload.optBoolean("is_dispatched", false),
                 )
             )
             resp.isSuccessful || resp.code() == 201
