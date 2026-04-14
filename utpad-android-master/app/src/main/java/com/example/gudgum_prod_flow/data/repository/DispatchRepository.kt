@@ -7,7 +7,6 @@ import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
 import com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.GgCustomerDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
-import com.example.gudgum_prod_flow.data.remote.dto.PatchProductionBatchRequest
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchFifoDto
 import com.example.gudgum_prod_flow.data.remote.dto.UpdateInvoiceStatusRequest
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
@@ -63,11 +62,51 @@ class DispatchRepository @Inject constructor(
         }
     }
 
+    /**
+     * Returns available inventory per batch for FIFO allocation.
+     *
+     * Available boxes = SUM(packing_sessions.boxes_packed) - SUM(dispatch_events.boxes_dispatched),
+     * grouped by batch_code and ordered by oldest session_date ASC (true FIFO).
+     * Batches with zero or negative available boxes are excluded.
+     */
     suspend fun getInventoryByFlavor(flavorId: String): Result<List<ProductionBatchFifoDto>> = withContext(Dispatchers.IO) {
         runCatching {
-            val response = api.getProductionBatchesByFlavor(flavorId = "eq.$flavorId")
-            if (response.isSuccessful) response.body() ?: emptyList()
-            else error("Failed to load batches for FIFO: ${response.code()}")
+            // 1. All packing sessions for this flavor, ordered oldest first
+            val sessionsResp = api.getPackingSessionsByFlavor(flavorId = "eq.$flavorId")
+            val sessions = if (sessionsResp.isSuccessful) sessionsResp.body() ?: emptyList()
+                           else error("Failed to load packing sessions for FIFO: ${sessionsResp.code()}")
+
+            // 2. All dispatch events for this flavor (non-fatal: treat missing as zero)
+            val dispatchResp = api.getDispatchedBoxesByFlavor(flavorId = "eq.$flavorId")
+            val dispatchEvents = if (dispatchResp.isSuccessful) dispatchResp.body() ?: emptyList()
+                                 else {
+                                     Log.w(TAG, "getDispatchedBoxesByFlavor failed [${dispatchResp.code()}], treating as zero")
+                                     emptyList()
+                                 }
+
+            // 3. Sum dispatched boxes per batch_code
+            val dispatchedPerBatch: Map<String, Int> = dispatchEvents
+                .groupBy { it.batchCode }
+                .mapValues { (_, events) -> events.sumOf { it.boxesDispatched } }
+
+            // 4. Group sessions by batch_code; sessions are already sorted ASC so first() = oldest date
+            sessions.groupBy { it.batchCode }
+                .mapNotNull { (batchCode, batchSessions) ->
+                    val totalPacked = batchSessions.sumOf { it.boxesPacked }
+                    val alreadyDispatched = dispatchedPerBatch[batchCode] ?: 0
+                    val available = maxOf(0, totalPacked - alreadyDispatched)
+                    if (available <= 0) return@mapNotNull null
+                    val oldestSessionDate = batchSessions.minOf { it.sessionDate }
+                    ProductionBatchFifoDto(
+                        id = batchCode,
+                        batchCode = batchCode,
+                        flavorId = flavorId,
+                        productionDate = oldestSessionDate,
+                        expectedBoxes = available,
+                        expectedUnits = available * 15,
+                    )
+                }
+                .sortedBy { it.productionDate }
         }
     }
 
@@ -114,28 +153,11 @@ class DispatchRepository @Inject constructor(
                         error("Failed to record dispatch for batch ${alloc.batchCode}: HTTP $code")
                     }
                     Log.d(TAG, "insertDispatchEvent success [$code] for ${alloc.batchCode}")
-
-                    // 2. Deduct stock from production_batches — NON-FATAL: data is saved, log and continue
-                    try {
-                        val newBoxes = alloc.availableUnits - alloc.unitsToTake
-                        val patchResp = api.patchProductionBatch(
-                            id = "eq.${alloc.inventoryId}",
-                            body = PatchProductionBatchRequest(
-                                expectedBoxes = newBoxes,
-                                expectedUnits = newBoxes * 15,
-                            ),
-                        )
-                        if (patchResp.code() !in 200..204) {
-                            Log.w(TAG, "patchProductionBatch non-fatal [${patchResp.code()}] for ${alloc.inventoryId}")
-                        } else {
-                            Log.d(TAG, "patchProductionBatch success [${patchResp.code()}] for ${alloc.inventoryId}")
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "patchProductionBatch threw (non-fatal) for ${alloc.inventoryId}: ${e.message}")
-                    }
+                    // Note: available stock is derived dynamically from packing_sessions minus
+                    // dispatch_events, so no production_batches patch is needed here.
                 }
 
-                // 3. Update invoice status — NON-FATAL: data is saved, log and continue
+                // 2. Update invoice status — NON-FATAL: data is saved, log and continue
                 if (isPacked || isDispatched) {
                     try {
                         val now = java.time.Instant.now().toString()

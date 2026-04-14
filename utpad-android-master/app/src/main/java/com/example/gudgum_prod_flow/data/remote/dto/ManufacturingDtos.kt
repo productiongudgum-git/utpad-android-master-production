@@ -254,8 +254,25 @@ data class ProductionBatchFifoDto(
     @SerialName("batch_code") val batchCode: String,
     @SerialName("flavor_id") val flavorId: String,
     @SerialName("production_date") val productionDate: String,
+    /** Available boxes = packed - dispatched (computed in DispatchRepository, not a raw DB column) */
     @SerialName("expected_boxes") val expectedBoxes: Int = 0,
     @SerialName("expected_units") val expectedUnits: Int = 0,
+)
+
+/** Packing session row fetched for FIFO available-boxes computation */
+@Serializable
+data class PackingSessionFifoDto(
+    @SerialName("batch_code") val batchCode: String,
+    @SerialName("flavor_id") val flavorId: String? = null,
+    @SerialName("session_date") val sessionDate: String,
+    @SerialName("boxes_packed") val boxesPacked: Int = 0,
+)
+
+/** Dispatch event row fetched for FIFO already-dispatched computation */
+@Serializable
+data class DispatchEventFifoDto(
+    @SerialName("batch_code") val batchCode: String,
+    @SerialName("boxes_dispatched") val boxesDispatched: Int = 0,
 )
 
 // ── Gg_ table DTOs ────────────────────────────────────────────────

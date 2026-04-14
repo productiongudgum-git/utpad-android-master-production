@@ -175,14 +175,20 @@ interface SupabaseApiService {
         @Query("select") select: String = "*",
     ): Response<List<InvoiceDto>>
 
-    // ── Production batches by flavor for FIFO allocation ──────────
-    @GET("rest/v1/production_batches")
-    suspend fun getProductionBatchesByFlavor(
+    // ── Packing sessions by flavor for FIFO available-boxes ──────────
+    @GET("rest/v1/packing_sessions")
+    suspend fun getPackingSessionsByFlavor(
         @Query("flavor_id") flavorId: String,
-        @Query("expected_boxes") expectedBoxes: String = "gt.0",
-        @Query("order") order: String = "production_date.asc",
-        @Query("select") select: String = "id,batch_code,flavor_id,production_date,expected_boxes,expected_units",
-    ): Response<List<ProductionBatchFifoDto>>
+        @Query("select") select: String = "batch_code,flavor_id,session_date,boxes_packed",
+        @Query("order") order: String = "session_date.asc",
+    ): Response<List<PackingSessionFifoDto>>
+
+    // ── Dispatch events by flavor for FIFO already-dispatched ────────
+    @GET("rest/v1/dispatch_events")
+    suspend fun getDispatchedBoxesByFlavor(
+        @Query("flavor_id") flavorId: String,
+        @Query("select") select: String = "batch_code,boxes_dispatched",
+    ): Response<List<DispatchEventFifoDto>>
 
     // ── Update invoice status ──────────────────────────────────────
     @PATCH("rest/v1/gg_invoices")

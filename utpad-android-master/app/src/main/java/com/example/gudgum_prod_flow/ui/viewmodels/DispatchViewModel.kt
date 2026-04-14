@@ -172,7 +172,7 @@ class DispatchViewModel @Inject constructor(
         computeFifo()
     }
 
-    /** FIFO allocation: sort batches by production_date ASC (oldest first), allocate from expected_boxes */
+    /** FIFO allocation: sort batches by oldest packing session_date ASC, allocate from available boxes (packed - dispatched) */
     private fun computeFifo() {
         val needed = _boxesToDispatch.value.toIntOrNull() ?: 0
         if (needed <= 0) {
