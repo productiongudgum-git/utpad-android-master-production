@@ -218,6 +218,17 @@ data class FifoAllocationLine(
     @SerialName("boxes_to_take") val boxesToTake: Int,
 )
 
+/** Lightweight projection of production_batches used for FIFO allocation */
+@Serializable
+data class ProductionBatchFifoDto(
+    val id: String,
+    @SerialName("batch_code") val batchCode: String,
+    @SerialName("flavor_id") val flavorId: String,
+    @SerialName("production_date") val productionDate: String,
+    @SerialName("expected_boxes") val expectedBoxes: Int = 0,
+    @SerialName("expected_units") val expectedUnits: Int = 0,
+)
+
 // ── Gg_ table DTOs ────────────────────────────────────────────────
 @Serializable
 data class GgUserDto(

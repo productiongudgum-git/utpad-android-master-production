@@ -5,7 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.remote.dto.FlavorJoinDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceItemDto
-import com.example.gudgum_prod_flow.data.remote.dto.InventoryFinishedGoodDto
+import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchFifoDto
 import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
 import com.example.gudgum_prod_flow.data.repository.DispatchRepository
 import com.example.gudgum_prod_flow.data.repository.FifoAllocation
@@ -59,7 +59,7 @@ class DispatchViewModel @Inject constructor(
     private val _fifoLines = MutableStateFlow<List<FifoDisplayLine>>(emptyList())
     val fifoLines: StateFlow<List<FifoDisplayLine>> = _fifoLines.asStateFlow()
 
-    private val _inventoryForFlavor = MutableStateFlow<List<InventoryFinishedGoodDto>>(emptyList())
+    private val _inventoryForFlavor = MutableStateFlow<List<ProductionBatchFifoDto>>(emptyList())
 
     private val _fifoError = MutableStateFlow<String?>(null)
     val fifoError: StateFlow<String?> = _fifoError.asStateFlow()
@@ -168,7 +168,7 @@ class DispatchViewModel @Inject constructor(
         computeFifo()
     }
 
-    /** FIFO allocation: sort inventory by oldest first, take from earliest batches */
+    /** FIFO allocation: sort batches by production_date ASC (oldest first), allocate from expected_boxes */
     private fun computeFifo() {
         val needed = _unitsToDispatch.value.toIntOrNull() ?: 0
         if (needed <= 0) {
@@ -177,18 +177,18 @@ class DispatchViewModel @Inject constructor(
             return
         }
 
-        val inventory = _inventoryForFlavor.value.sortedBy { it.id } // already ordered by updated_at ASC from API
+        val inventory = _inventoryForFlavor.value.sortedBy { it.productionDate }
         val lines = mutableListOf<FifoDisplayLine>()
         var remaining = needed
 
         for (item in inventory) {
             if (remaining <= 0) break
-            val take = minOf(remaining, item.unitsAvailable)
+            val take = minOf(remaining, item.expectedBoxes)
             lines.add(
                 FifoDisplayLine(
                     inventoryId = item.id,
                     batchCode = item.batchCode,
-                    availableUnits = item.unitsAvailable,
+                    availableUnits = item.expectedBoxes,
                     unitsToTake = take,
                 )
             )
@@ -197,7 +197,7 @@ class DispatchViewModel @Inject constructor(
 
         _fifoLines.value = lines
         _fifoError.value = if (remaining > 0) {
-            "Insufficient stock! Short by $remaining units."
+            "Insufficient stock! Short by $remaining boxes."
         } else {
             null
         }

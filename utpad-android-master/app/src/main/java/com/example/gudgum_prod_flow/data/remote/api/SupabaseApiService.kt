@@ -175,14 +175,13 @@ interface SupabaseApiService {
         @Query("select") select: String = "*",
     ): Response<List<InvoiceDto>>
 
-    // ── Inventory by flavor for FIFO allocation ────────────────────
-    @GET("rest/v1/inventory_finished_goods")
-    suspend fun getInventoryByFlavor(
-        @Query("sku_id") skuId: String,
-        @Query("units_available") unitsFilter: String = "gt.0",
-        @Query("order") order: String = "updated_at.asc",
-        @Query("select") select: String = "*",
-    ): Response<List<InventoryFinishedGoodDto>>
+    // ── Production batches by flavor for FIFO allocation ──────────
+    @GET("rest/v1/production_batches")
+    suspend fun getProductionBatchesByFlavor(
+        @Query("flavor_id") flavorId: String,
+        @Query("order") order: String = "production_date.asc",
+        @Query("select") select: String = "id,batch_code,flavor_id,production_date,expected_boxes,expected_units",
+    ): Response<List<ProductionBatchFifoDto>>
 
     // ── Update invoice status ──────────────────────────────────────
     @PATCH("rest/v1/gg_invoices")
@@ -195,6 +194,14 @@ interface SupabaseApiService {
     // ── Update inventory finished goods ────────────────────────────
     @PATCH("rest/v1/inventory_finished_goods")
     suspend fun updateInventory(
+        @Query("id") id: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=minimal",
+    ): Response<Unit>
+
+    // ── Patch production_batches stock after FIFO dispatch ─────────
+    @PATCH("rest/v1/production_batches")
+    suspend fun patchProductionBatch(
         @Query("id") id: String,
         @Body body: Map<String, @JvmSuppressWildcards Any?>,
         @Header("Prefer") prefer: String = "return=minimal",

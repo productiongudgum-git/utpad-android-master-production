@@ -7,7 +7,7 @@ import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
 import com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.GgCustomerDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
-import com.example.gudgum_prod_flow.data.remote.dto.InventoryFinishedGoodDto
+import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchFifoDto
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitDispatchEventRequest
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
@@ -61,11 +61,11 @@ class DispatchRepository @Inject constructor(
         }
     }
 
-    suspend fun getInventoryByFlavor(flavorId: String): Result<List<InventoryFinishedGoodDto>> = withContext(Dispatchers.IO) {
+    suspend fun getInventoryByFlavor(flavorId: String): Result<List<ProductionBatchFifoDto>> = withContext(Dispatchers.IO) {
         runCatching {
-            val response = api.getInventoryByFlavor(skuId = "eq.$flavorId")
+            val response = api.getProductionBatchesByFlavor(flavorId = "eq.$flavorId")
             if (response.isSuccessful) response.body() ?: emptyList()
-            else error("Failed to load inventory: ${response.code()}")
+            else error("Failed to load batches for FIFO: ${response.code()}")
         }
     }
 
@@ -110,14 +110,18 @@ class DispatchRepository @Inject constructor(
                         error("Failed to create dispatch for batch ${alloc.batchCode}")
                     }
 
-                    // 2. Deduct units from inventory
-                    val newUnits = alloc.availableUnits - alloc.unitsToTake
-                    val updateResp = api.updateInventory(
+                    // 2. Deduct expected_boxes and expected_units from production_batches
+                    val newBoxes = alloc.availableUnits - alloc.unitsToTake
+                    val newUnits = newBoxes * 15
+                    val updateResp = api.patchProductionBatch(
                         id = "eq.${alloc.inventoryId}",
-                        body = mapOf("units_available" to newUnits),
+                        body = mapOf(
+                            "expected_boxes" to newBoxes,
+                            "expected_units" to newUnits,
+                        ),
                     )
                     if (!updateResp.isSuccessful) {
-                        Log.w(TAG, "Inventory update failed for ${alloc.inventoryId}: ${updateResp.code()}")
+                        Log.w(TAG, "Production batch stock update failed for ${alloc.inventoryId}: ${updateResp.code()}")
                     }
                 }
 
