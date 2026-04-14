@@ -63,9 +63,21 @@ class DispatchRepository @Inject constructor(
 
     suspend fun getInventoryByFlavor(flavorId: String): Result<List<InventoryFinishedGoodDto>> = withContext(Dispatchers.IO) {
         runCatching {
+            Log.d(TAG, "getInventoryByFlavor: querying with flavorId='$flavorId' (sent as sku_id filter 'eq.$flavorId')")
             val response = api.getInventoryByFlavor(skuId = "eq.$flavorId")
-            if (response.isSuccessful) response.body() ?: emptyList()
-            else error("Failed to load inventory: ${response.code()}")
+            Log.d(TAG, "getInventoryByFlavor: response code=${response.code()} isSuccessful=${response.isSuccessful}")
+            if (response.isSuccessful) {
+                val rows = response.body() ?: emptyList()
+                Log.d(TAG, "getInventoryByFlavor: returned ${rows.size} row(s)")
+                rows.forEachIndexed { i, row ->
+                    Log.d(TAG, "  row[$i] id=${row.id} skuId=${row.skuId} batchCode=${row.batchCode} unitsAvailable=${row.unitsAvailable}")
+                }
+                rows
+            } else {
+                val errBody = response.errorBody()?.string() ?: ""
+                Log.e(TAG, "getInventoryByFlavor: error body=$errBody")
+                error("Failed to load inventory: ${response.code()}")
+            }
         }
     }
 

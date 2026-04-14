@@ -1,5 +1,6 @@
 package com.example.gudgum_prod_flow.ui.viewmodels
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.remote.dto.FlavorJoinDto
@@ -70,6 +71,10 @@ class DispatchViewModel @Inject constructor(
 
     private val _isDispatched = MutableStateFlow(false)
     val isDispatched: StateFlow<Boolean> = _isDispatched.asStateFlow()
+
+    companion object {
+        private const val TAG = "DispatchViewModel"
+    }
 
     private val _dispatchDate = MutableStateFlow(
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -147,14 +152,18 @@ class DispatchViewModel @Inject constructor(
         _fifoLines.value = emptyList()
         _unitsToDispatch.value = item.quantityUnits.toString()
 
+        Log.d(TAG, "onItemSelected: flavorId='${item.flavorId}' flavorName='${item.flavor?.name}' quantityUnits=${item.quantityUnits}")
+
         // Load inventory for this flavor
         viewModelScope.launch {
             val result = repository.getInventoryByFlavor(item.flavorId)
             result.onSuccess { inventory ->
+                Log.d(TAG, "onItemSelected: inventory loaded, ${inventory.size} row(s) for flavorId='${item.flavorId}'")
                 _inventoryForFlavor.value = inventory
                 computeFifo()
             }
-            result.onFailure {
+            result.onFailure { e ->
+                Log.e(TAG, "onItemSelected: failed to load inventory for flavorId='${item.flavorId}'", e)
                 _inventoryForFlavor.value = emptyList()
                 _fifoError.value = "Could not load inventory for this flavour"
             }
@@ -171,13 +180,21 @@ class DispatchViewModel @Inject constructor(
     /** FIFO allocation: sort inventory by oldest first, take from earliest batches */
     private fun computeFifo() {
         val needed = _unitsToDispatch.value.toIntOrNull() ?: 0
+        Log.d(TAG, "computeFifo: needed=$needed inventoryRows=${_inventoryForFlavor.value.size}")
+
         if (needed <= 0) {
+            Log.d(TAG, "computeFifo: needed <= 0, clearing fifoLines")
             _fifoLines.value = emptyList()
             _fifoError.value = null
             return
         }
 
         val inventory = _inventoryForFlavor.value.sortedBy { it.id } // already ordered by updated_at ASC from API
+        Log.d(TAG, "computeFifo: inventory after sort (${inventory.size} rows):")
+        inventory.forEachIndexed { i, row ->
+            Log.d(TAG, "  inventory[$i] id=${row.id} batchCode=${row.batchCode} unitsAvailable=${row.unitsAvailable}")
+        }
+
         val lines = mutableListOf<FifoDisplayLine>()
         var remaining = needed
 
@@ -195,8 +212,17 @@ class DispatchViewModel @Inject constructor(
             remaining -= take
         }
 
+        Log.d(TAG, "computeFifo: result=${lines.size} allocation line(s), remaining=$remaining")
+        lines.forEachIndexed { i, line ->
+            Log.d(TAG, "  fifoLine[$i] inventoryId=${line.inventoryId} batchCode=${line.batchCode} take=${line.unitsToTake}/${line.availableUnits}")
+        }
+        if (lines.isEmpty()) {
+            Log.w(TAG, "computeFifo: NO allocation lines produced — inventory list was empty or all rows had 0 units")
+        }
+
         _fifoLines.value = lines
         _fifoError.value = if (remaining > 0) {
+            Log.w(TAG, "computeFifo: insufficient stock, short by $remaining units")
             "Insufficient stock! Short by $remaining units."
         } else {
             null
