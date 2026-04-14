@@ -205,7 +205,10 @@ class DispatchViewModel @Inject constructor(
 
     // ── Step 5 ─────────────────────────────────────────────────────
 
-    fun onPackedToggle(value: Boolean) { _isPacked.value = value }
+    fun onPackedToggle(value: Boolean) {
+        _isPacked.value = value
+        if (!value) _isDispatched.value = false
+    }
     fun onDispatchedToggle(value: Boolean) { _isDispatched.value = value }
     fun onDispatchDateChanged(value: String) { _dispatchDate.value = value }
 

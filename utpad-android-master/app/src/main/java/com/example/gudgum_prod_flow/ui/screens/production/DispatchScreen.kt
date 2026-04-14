@@ -556,15 +556,24 @@ fun DispatchScreen(
                                         onCheckedChange = { viewModel.onPackedToggle(it) },
                                         colors = CheckboxDefaults.colors(checkedColor = UtpadPrimary),
                                     )
-                                    Text(
-                                        text = "Mark Invoice as Packed",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = UtpadTextPrimary,
-                                    )
+                                    Column {
+                                        Text(
+                                            text = "Mark Invoice as Packed",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = UtpadTextPrimary,
+                                        )
+                                        if (!isPacked) {
+                                            Text(
+                                                text = "Required before submission",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = UtpadError,
+                                            )
+                                        }
+                                    }
                                 }
 
-                                // Dispatched checkbox
+                                // Dispatched checkbox — only enabled once invoice is packed
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.fillMaxWidth(),
@@ -572,13 +581,18 @@ fun DispatchScreen(
                                     Checkbox(
                                         checked = isDispatched,
                                         onCheckedChange = { viewModel.onDispatchedToggle(it) },
-                                        colors = CheckboxDefaults.colors(checkedColor = UtpadSuccess),
+                                        enabled = isPacked,
+                                        colors = CheckboxDefaults.colors(
+                                            checkedColor = UtpadSuccess,
+                                            disabledCheckedColor = UtpadOutline,
+                                            disabledUncheckedColor = UtpadOutline,
+                                        ),
                                     )
                                     Text(
                                         text = "Mark Invoice as Dispatched",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = UtpadTextPrimary,
+                                        color = if (isPacked) UtpadTextPrimary else UtpadTextSecondary,
                                     )
                                 }
                             }
