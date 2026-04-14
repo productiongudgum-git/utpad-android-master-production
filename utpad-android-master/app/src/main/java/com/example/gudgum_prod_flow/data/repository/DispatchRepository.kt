@@ -9,6 +9,7 @@ import com.example.gudgum_prod_flow.data.remote.dto.GgCustomerDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
 import com.example.gudgum_prod_flow.data.remote.dto.PatchProductionBatchRequest
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchFifoDto
+import com.example.gudgum_prod_flow.data.remote.dto.UpdateInvoiceStatusRequest
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitDispatchEventRequest
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
@@ -127,19 +128,16 @@ class DispatchRepository @Inject constructor(
                 }
 
                 // 3. Update invoice status
-                val statusBody = mutableMapOf<String, Any?>()
-                if (isPacked) {
-                    statusBody["is_packed"] = true
-                    statusBody["packed_at"] = java.time.Instant.now().toString()
-                }
-                if (isDispatched) {
-                    statusBody["is_dispatched"] = true
-                    statusBody["dispatched_at"] = java.time.Instant.now().toString()
-                }
-                if (statusBody.isNotEmpty()) {
+                if (isPacked || isDispatched) {
+                    val now = java.time.Instant.now().toString()
                     api.updateInvoiceStatus(
                         invoiceId = "eq.$invoiceId",
-                        body = statusBody,
+                        body = UpdateInvoiceStatusRequest(
+                            isPacked = if (isPacked) true else null,
+                            packedAt = if (isPacked) now else null,
+                            isDispatched = if (isDispatched) true else null,
+                            dispatchedAt = if (isDispatched) now else null,
+                        ),
                     )
                 }
             }
@@ -179,19 +177,16 @@ class DispatchRepository @Inject constructor(
         isDispatched: Boolean? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val body = mutableMapOf<String, Any?>()
-            if (isPacked != null) {
-                body["is_packed"] = isPacked
-                if (isPacked) body["packed_at"] = java.time.Instant.now().toString()
-            }
-            if (isDispatched != null) {
-                body["is_dispatched"] = isDispatched
-                if (isDispatched) body["dispatched_at"] = java.time.Instant.now().toString()
-            }
-            if (body.isNotEmpty()) {
+            if (isPacked != null || isDispatched != null) {
+                val now = java.time.Instant.now().toString()
                 val response = api.updateInvoiceStatus(
                     invoiceId = "eq.$invoiceId",
-                    body = body,
+                    body = UpdateInvoiceStatusRequest(
+                        isPacked = isPacked,
+                        packedAt = if (isPacked == true) now else null,
+                        isDispatched = isDispatched,
+                        dispatchedAt = if (isDispatched == true) now else null,
+                    ),
                 )
                 if (!response.isSuccessful) {
                     error("Failed to update invoice status: ${response.code()}")

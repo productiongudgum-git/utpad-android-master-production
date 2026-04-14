@@ -187,7 +187,7 @@ interface SupabaseApiService {
     @PATCH("rest/v1/gg_invoices")
     suspend fun updateInvoiceStatus(
         @Query("id") invoiceId: String,
-        @Body body: Map<String, @JvmSuppressWildcards Any?>,
+        @Body body: UpdateInvoiceStatusRequest,
         @Header("Prefer") prefer: String = "return=minimal",
     ): Response<Unit>
 
@@ -195,7 +195,7 @@ interface SupabaseApiService {
     @PATCH("rest/v1/inventory_finished_goods")
     suspend fun updateInventory(
         @Query("id") id: String,
-        @Body body: Map<String, @JvmSuppressWildcards Any?>,
+        @Body body: UpdateInventoryRequest,
         @Header("Prefer") prefer: String = "return=minimal",
     ): Response<Unit>
 

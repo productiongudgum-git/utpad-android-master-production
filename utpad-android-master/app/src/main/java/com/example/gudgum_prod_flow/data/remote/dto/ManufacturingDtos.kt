@@ -218,6 +218,21 @@ data class FifoAllocationLine(
     @SerialName("boxes_to_take") val boxesToTake: Int,
 )
 
+/** PATCH body for updating invoice packed/dispatched status */
+@Serializable
+data class UpdateInvoiceStatusRequest(
+    @SerialName("is_packed") val isPacked: Boolean? = null,
+    @SerialName("is_dispatched") val isDispatched: Boolean? = null,
+    @SerialName("packed_at") val packedAt: String? = null,
+    @SerialName("dispatched_at") val dispatchedAt: String? = null,
+)
+
+/** PATCH body for updating available units in inventory_finished_goods */
+@Serializable
+data class UpdateInventoryRequest(
+    @SerialName("units_available") val unitsAvailable: Int,
+)
+
 /** PATCH body for deducting stock from production_batches after dispatch */
 @Serializable
 data class PatchProductionBatchRequest(
