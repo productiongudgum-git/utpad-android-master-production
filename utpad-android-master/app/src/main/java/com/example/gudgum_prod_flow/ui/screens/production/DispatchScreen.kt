@@ -96,6 +96,9 @@ fun DispatchScreen(
     val dispatchDate by viewModel.dispatchDate.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
     val currentStep by viewModel.currentWizardStep.collectAsState()
+    val invoiceAlreadyPacked by viewModel.invoiceAlreadyPacked.collectAsState()
+    val stockCheckError by viewModel.stockCheckError.collectAsState()
+    val stockCheckLoading by viewModel.stockCheckLoading.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -470,17 +473,33 @@ fun DispatchScreen(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = UtpadTextPrimary,
                                 )
-                                Text(
-                                    text = "Flavour: ${selectedItem?.flavor?.name ?: "—"}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = UtpadTextPrimary,
-                                )
-                                Text(
-                                    text = "Boxes: $boxesToDispatch across ${fifoLines.size} batch(es)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = UtpadPrimary,
-                                )
+                                if (invoiceAlreadyPacked) {
+                                    // FIX 1: pre-packed invoice — show packed badge, skip FIFO summary
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = UtpadSuccess.copy(alpha = 0.12f),
+                                    ) {
+                                        Text(
+                                            text = "Already packed — confirm dispatch only",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = UtpadSuccess,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = "Flavour: ${selectedItem?.flavor?.name ?: "—"}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = UtpadTextPrimary,
+                                    )
+                                    Text(
+                                        text = "Boxes: $boxesToDispatch across ${fifoLines.size} batch(es)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = UtpadPrimary,
+                                    )
+                                }
 
                                 HorizontalDivider(color = UtpadOutline)
 
@@ -594,6 +613,39 @@ fun DispatchScreen(
                                         color = if (isPacked) UtpadTextPrimary else UtpadTextSecondary,
                                     )
                                 }
+
+                                // FIX 2: stock availability feedback
+                                if (stockCheckLoading) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.height(16.dp).width(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = UtpadPrimary,
+                                        )
+                                        Text(
+                                            text = "Checking stock availability…",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = UtpadTextSecondary,
+                                        )
+                                    }
+                                }
+                                if (stockCheckError != null) {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = UtpadError.copy(alpha = 0.1f),
+                                    ) {
+                                        Text(
+                                            text = stockCheckError!!,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = UtpadError,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(12.dp),
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -638,7 +690,10 @@ fun DispatchScreen(
                                 containerColor = UtpadPrimary,
                                 contentColor = Color.White
                             ),
-                            enabled = submitState !is SubmitState.Loading,
+                            // FIX 2: also block while stock check is running or has failed
+                            enabled = submitState !is SubmitState.Loading
+                                && !stockCheckLoading
+                                && (currentStep < 5 || stockCheckError == null),
                         ) {
                             Text(
                                 if (currentStep < 5) "Continue" else "Confirm Dispatch",
