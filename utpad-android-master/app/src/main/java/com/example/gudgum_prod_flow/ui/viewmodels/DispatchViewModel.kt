@@ -269,14 +269,14 @@ class DispatchViewModel @Inject constructor(
         val step = _currentWizardStep.value
         when {
             // FIX 1: invoice already packed — jump from Step 1 directly to Step 5
+            // Stock was verified at packing time; skip the check entirely.
             step == 1 && _invoiceAlreadyPacked.value -> {
                 _currentWizardStep.value = 5
-                checkStockForInvoice()
             }
             step < 5 -> {
                 _currentWizardStep.value = step + 1
-                // FIX 2: trigger stock check whenever Step 5 is entered via normal flow
-                if (step + 1 == 5) checkStockForInvoice()
+                // FIX 2: trigger stock check only for the normal (unpacked) FIFO flow
+                if (step + 1 == 5 && !_invoiceAlreadyPacked.value) checkStockForInvoice()
             }
         }
     }
@@ -307,12 +307,15 @@ class DispatchViewModel @Inject constructor(
             _submitState.value = SubmitState.Error("This invoice has not been packed yet. Please mark it as packed before dispatching.")
             return
         }
-        // FIX 2: block if stock check found insufficient stock
-        val stockErr = _stockCheckError.value
-        if (stockErr != null) {
-            Log.d(TAG, "submit() blocked: stockCheckError = $stockErr")
-            _submitState.value = SubmitState.Error(stockErr)
-            return
+        // FIX 2: block if stock check found insufficient stock (normal flow only)
+        // Pre-packed invoices skip the stock check — stock was verified at packing time.
+        if (!_invoiceAlreadyPacked.value) {
+            val stockErr = _stockCheckError.value
+            if (stockErr != null) {
+                Log.d(TAG, "submit() blocked: stockCheckError = $stockErr")
+                _submitState.value = SubmitState.Error(stockErr)
+                return
+            }
         }
 
         // FIX 1: pre-packed path — steps 2-4 were skipped, just update dispatch status
