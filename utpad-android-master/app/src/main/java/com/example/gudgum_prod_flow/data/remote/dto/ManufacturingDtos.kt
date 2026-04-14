@@ -218,6 +218,13 @@ data class FifoAllocationLine(
     @SerialName("boxes_to_take") val boxesToTake: Int,
 )
 
+/** PATCH body for deducting stock from production_batches after dispatch */
+@Serializable
+data class PatchProductionBatchRequest(
+    @SerialName("expected_boxes") val expectedBoxes: Int,
+    @SerialName("expected_units") val expectedUnits: Int,
+)
+
 /** Lightweight projection of production_batches used for FIFO allocation */
 @Serializable
 data class ProductionBatchFifoDto(

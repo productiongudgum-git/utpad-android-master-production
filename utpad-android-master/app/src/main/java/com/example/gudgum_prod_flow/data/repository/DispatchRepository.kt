@@ -7,6 +7,7 @@ import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
 import com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.GgCustomerDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
+import com.example.gudgum_prod_flow.data.remote.dto.PatchProductionBatchRequest
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchFifoDto
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitDispatchEventRequest
@@ -115,9 +116,9 @@ class DispatchRepository @Inject constructor(
                     val newUnits = newBoxes * 15
                     val updateResp = api.patchProductionBatch(
                         id = "eq.${alloc.inventoryId}",
-                        body = mapOf(
-                            "expected_boxes" to newBoxes,
-                            "expected_units" to newUnits,
+                        body = PatchProductionBatchRequest(
+                            expectedBoxes = newBoxes,
+                            expectedUnits = newUnits,
                         ),
                     )
                     if (!updateResp.isSuccessful) {

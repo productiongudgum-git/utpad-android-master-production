@@ -203,7 +203,7 @@ interface SupabaseApiService {
     @PATCH("rest/v1/production_batches")
     suspend fun patchProductionBatch(
         @Query("id") id: String,
-        @Body body: Map<String, @JvmSuppressWildcards Any?>,
+        @Body body: PatchProductionBatchRequest,
         @Header("Prefer") prefer: String = "return=minimal",
     ): Response<Unit>
 }
