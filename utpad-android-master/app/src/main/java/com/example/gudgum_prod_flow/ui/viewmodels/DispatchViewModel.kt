@@ -134,6 +134,7 @@ class DispatchViewModel @Inject constructor(
                 invoiceId = invoice.id,
                 flavorId = jsonItem.flavorId,
                 quantityUnits = jsonItem.quantityUnits,
+                quantityBoxes = jsonItem.quantityBoxes,
                 flavor = FlavorJoinDto(
                     id = jsonItem.flavorId,
                     name = jsonItem.flavorName,
@@ -148,7 +149,7 @@ class DispatchViewModel @Inject constructor(
     fun onItemSelected(item: InvoiceItemDto) {
         _selectedItem.value = item
         _fifoLines.value = emptyList()
-        _boxesToDispatch.value = (item.quantityUnits / 15).toString()
+        _boxesToDispatch.value = item.resolvedBoxes.toString()
 
         // Load inventory for this flavor
         viewModelScope.launch {

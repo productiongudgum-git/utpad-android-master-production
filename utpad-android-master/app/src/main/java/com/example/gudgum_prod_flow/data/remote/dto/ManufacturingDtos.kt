@@ -133,6 +133,7 @@ data class InvoiceItemJson(
     @SerialName("flavor_id") val flavorId: String = "",
     @SerialName("flavor_name") val flavorName: String = "Unknown",
     @SerialName("quantity_units") val quantityUnits: Int = 0,
+    @SerialName("quantity_boxes") val quantityBoxes: Int? = null,
 )
 
 @Serializable
@@ -153,8 +154,14 @@ data class InvoiceItemDto(
     val invoiceId: String = "",
     val flavorId: String,
     val quantityUnits: Int,
+    val quantityBoxes: Int? = null,
     val flavor: FlavorJoinDto? = null,
-)
+) {
+    /** Boxes to dispatch: use quantity_boxes if present and > 0, else ceil(quantity_units / 15). */
+    val resolvedBoxes: Int get() =
+        if (quantityBoxes != null && quantityBoxes > 0) quantityBoxes
+        else Math.ceil(quantityUnits / 15.0).toInt()
+}
 
 // ── Inventory Finished Goods (inventory_finished_goods) ────────────
 @Serializable

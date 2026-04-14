@@ -265,7 +265,7 @@ fun DispatchScreen(
                                                 fontWeight = FontWeight.SemiBold,
                                             )
                                             Text(
-                                                text = "${item.quantityUnits / 15} boxes",
+                                                text = "${item.resolvedBoxes} boxes",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = UtpadPrimary,
                                                 fontWeight = FontWeight.Bold,
@@ -322,7 +322,7 @@ fun DispatchScreen(
                                                 )
                                             }
                                             Text(
-                                                text = "${item.quantityUnits / 15} boxes",
+                                                text = "${item.resolvedBoxes} boxes",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = if (isSelected) UtpadPrimary else UtpadTextSecondary,
