@@ -6,11 +6,9 @@ import com.example.gudgum_prod_flow.data.local.dao.PendingOperationEventDao
 import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
 import com.example.gudgum_prod_flow.data.local.entity.PendingOperationEventEntity
 import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
-import com.example.gudgum_prod_flow.data.remote.dto.PackingSessionDto
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitPackingSessionRequest
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
-import com.example.gudgum_prod_flow.util.isDuplicateKeyConflict
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -75,24 +73,9 @@ class PackingRepository @Inject constructor(
                     unitsPacked = unitsPacked,
                 )
 
-                val existingSession = findExistingSession(batchCode, flavorId, packingDate)
-                if (existingSession?.id != null) {
-                    updateSession(existingSession.id, request)
-                    return@runCatching
-                }
-
                 val response = api.insertPackingSession(request)
                 val body = response.errorBody()?.string().orEmpty()
                 if (!response.isSuccessful && response.code() != 201) {
-                    if (isDuplicateKeyConflict(response.code(), body)) {
-                        val duplicateSession = findExistingSession(batchCode, flavorId, packingDate)
-                        if (duplicateSession?.id != null) {
-                            updateSession(duplicateSession.id, request)
-                            return@runCatching
-                        }
-                        error("This packing session is already saved for the selected batch and date.")
-                    }
-
                     Log.e(TAG, "Packing save failed: ${response.code()} $body")
                     error("Unable to save the packing session right now. Please try again.")
                 }
@@ -123,34 +106,4 @@ class PackingRepository @Inject constructor(
         }
     }
 
-    private suspend fun findExistingSession(
-        batchCode: String,
-        flavorId: String?,
-        packingDate: String,
-    ): PackingSessionDto? {
-        val response = api.findPackingSession(
-            batchCode = "eq.$batchCode",
-            flavorId = flavorId?.let { "eq.$it" } ?: "is.null",
-            sessionDate = "eq.$packingDate",
-        )
-
-        if (!response.isSuccessful) {
-            Log.w(TAG, "Failed to lookup packing session: ${response.code()}")
-            return null
-        }
-
-        return response.body().orEmpty().firstOrNull()
-    }
-
-    private suspend fun updateSession(sessionId: String, request: SubmitPackingSessionRequest) {
-        val response = api.updatePackingSession(
-            id = "eq.$sessionId",
-            request = request,
-        )
-        val errorBody = response.errorBody()?.string().orEmpty()
-        if (!response.isSuccessful) {
-            Log.e(TAG, "Failed to update packing session $sessionId: ${response.code()} $errorBody")
-            error("Unable to update the existing packing session right now. Please try again.")
-        }
-    }
 }
