@@ -224,6 +224,10 @@ class DispatchViewModel @Inject constructor(
             _submitState.value = SubmitState.Error("Select an invoice")
             return
         }
+        if (!invoice.isPacked) {
+            _submitState.value = SubmitState.Error("This invoice has not been packed yet. Please mark it as packed before dispatching.")
+            return
+        }
         val item = _selectedItem.value
         if (item == null) {
             _submitState.value = SubmitState.Error("Select a flavour")
