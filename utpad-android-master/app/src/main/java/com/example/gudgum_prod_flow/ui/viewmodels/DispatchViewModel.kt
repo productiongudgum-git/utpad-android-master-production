@@ -1,5 +1,6 @@
 package com.example.gudgum_prod_flow.ui.viewmodels
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.remote.dto.FlavorJoinDto
@@ -33,6 +34,8 @@ class DispatchViewModel @Inject constructor(
     private val repository: DispatchRepository,
     private val realtimeManager: SupabaseRealtimeManager,
 ) : ViewModel() {
+
+    companion object { private const val TAG = "DispatchViewModel" }
 
     // ── Step 1: Invoice selection ──────────────────────────────────
     private val _invoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
@@ -224,27 +227,38 @@ class DispatchViewModel @Inject constructor(
 
         val invoice = _selectedInvoice.value
         if (invoice == null) {
+            Log.d(TAG, "submit() blocked: no invoice selected")
             _submitState.value = SubmitState.Error("Select an invoice")
             return
         }
-        if (!invoice.isPacked) {
+        // Validate against the wizard checkbox (_isPacked), not the stale DB value (invoice.isPacked)
+        if (!_isPacked.value) {
+            Log.d(TAG, "submit() blocked: isPacked checkbox is false for invoice ${invoice.invoiceNumber}")
             _submitState.value = SubmitState.Error("This invoice has not been packed yet. Please mark it as packed before dispatching.")
             return
         }
         val item = _selectedItem.value
         if (item == null) {
+            Log.d(TAG, "submit() blocked: no flavour selected")
             _submitState.value = SubmitState.Error("Select a flavour")
             return
         }
         val lines = _fifoLines.value
         if (lines.isEmpty()) {
+            Log.d(TAG, "submit() blocked: fifoLines is empty — inventory may not have loaded yet")
             _submitState.value = SubmitState.Error("No FIFO allocation computed")
             return
         }
         if (_fifoError.value != null) {
+            Log.d(TAG, "submit() blocked: fifoError = ${_fifoError.value}")
             _submitState.value = SubmitState.Error(_fifoError.value!!)
             return
         }
+
+        Log.d(TAG, "submit() starting — invoice=${invoice.invoiceNumber}, flavour=${item.flavorId}, " +
+                "boxes=${_boxesToDispatch.value}, lines=${lines.size}, " +
+                "isPacked=${_isPacked.value}, isDispatched=${_isDispatched.value}, " +
+                "workerId=${WorkerIdentityStore.workerId}, online=$isOnline")
 
         _submitState.value = SubmitState.Loading
         viewModelScope.launch {
@@ -256,6 +270,7 @@ class DispatchViewModel @Inject constructor(
                     unitsToTake = line.unitsToTake,
                 )
             }
+            Log.d(TAG, "submit() allocations: ${allocations.map { "${it.batchCode}=${it.unitsToTake}boxes" }}")
 
             val result = repository.submitFifoDispatch(
                 invoiceId = invoice.id,
@@ -272,6 +287,7 @@ class DispatchViewModel @Inject constructor(
 
             result.onSuccess {
                 val totalBoxes = lines.sumOf { it.unitsToTake }
+                Log.d(TAG, "submit() success — $totalBoxes boxes dispatched for ${invoice.invoiceNumber}")
                 _submitState.value = SubmitState.Success(
                     if (isOnline) "Dispatched $totalBoxes boxes for invoice ${invoice.invoiceNumber}"
                     else "Dispatch saved offline — will sync when connected"
@@ -280,6 +296,7 @@ class DispatchViewModel @Inject constructor(
                 loadInvoices()
             }
             result.onFailure { e ->
+                Log.e(TAG, "submit() failed — ${e::class.simpleName}: ${e.message}", e)
                 _submitState.value = SubmitState.Error(e.message ?: "Dispatch failed")
             }
         }

@@ -94,7 +94,6 @@ fun DispatchScreen(
     val isPacked by viewModel.isPacked.collectAsState()
     val isDispatched by viewModel.isDispatched.collectAsState()
     val dispatchDate by viewModel.dispatchDate.collectAsState()
-    val allInvoices by viewModel.allInvoices.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
     val currentStep by viewModel.currentWizardStep.collectAsState()
 
@@ -600,94 +599,6 @@ fun DispatchScreen(
                     }
                 }
 
-                // ── Dispatch Tracking Table ──
-                if (allInvoices.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Card(
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = UtpadSurface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "DISPATCH TRACKING",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = UtpadTextSecondary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // Header
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text("Invoice", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(1.2f))
-                                Text("Customer", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(1.2f))
-                                Text("Packed", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center)
-                                Text("Sent", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center)
-                            }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = UtpadOutline)
-
-                            allInvoices.forEach { inv ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 6.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = inv.invoiceNumber,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = UtpadTextPrimary,
-                                        modifier = Modifier.weight(1.2f),
-                                    )
-                                    Text(
-                                        text = inv.customerName,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = UtpadTextSecondary,
-                                        modifier = Modifier.weight(1.2f),
-                                    )
-                                    // Packed toggle
-                                    Surface(
-                                        onClick = { viewModel.toggleInvoicePacked(inv) },
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = if (inv.isPacked) UtpadSuccess.copy(alpha = 0.15f) else UtpadOutline.copy(alpha = 0.3f),
-                                        modifier = Modifier.weight(0.8f),
-                                    ) {
-                                        Text(
-                                            text = if (inv.isPacked) "Yes" else "No",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (inv.isPacked) UtpadSuccess else UtpadTextSecondary,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.padding(vertical = 4.dp, horizontal = 8.dp),
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    // Dispatched toggle
-                                    Surface(
-                                        onClick = { viewModel.toggleInvoiceDispatched(inv) },
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = if (inv.isDispatched) UtpadSuccess.copy(alpha = 0.15f) else UtpadOutline.copy(alpha = 0.3f),
-                                        modifier = Modifier.weight(0.8f),
-                                    ) {
-                                        Text(
-                                            text = if (inv.isDispatched) "Yes" else "No",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (inv.isDispatched) UtpadSuccess else UtpadTextSecondary,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.padding(vertical = 4.dp, horizontal = 8.dp),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
 
             // Bottom action bar

@@ -89,7 +89,7 @@ class DispatchRepository @Inject constructor(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         if (isOnline) {
             runCatching {
-                // 1. Create dispatch events for each FIFO allocation line
+                // 1. Insert dispatch event — FATAL: if this fails the whole operation fails
                 for (alloc in allocations) {
                     val request = SubmitDispatchEventRequest(
                         batchCode = alloc.batchCode,
@@ -106,39 +106,56 @@ class DispatchRepository @Inject constructor(
                         isDispatched = isDispatched,
                     )
                     val response = api.insertDispatchEvent(request)
-                    if (!response.isSuccessful && response.code() != 201) {
-                        val body = response.errorBody()?.string() ?: ""
-                        Log.e(TAG, "Dispatch insert failed for batch ${alloc.batchCode}: ${response.code()} $body")
-                        error("Failed to create dispatch for batch ${alloc.batchCode}")
+                    // 200, 201, 204 are all valid success codes from Supabase
+                    val code = response.code()
+                    if (code !in 200..204) {
+                        val errBody = response.errorBody()?.string() ?: ""
+                        Log.e(TAG, "insertDispatchEvent failed [$code] for ${alloc.batchCode}: $errBody")
+                        error("Failed to record dispatch for batch ${alloc.batchCode}: HTTP $code")
                     }
+                    Log.d(TAG, "insertDispatchEvent success [$code] for ${alloc.batchCode}")
 
-                    // 2. Deduct expected_boxes and expected_units from production_batches
-                    val newBoxes = alloc.availableUnits - alloc.unitsToTake
-                    val newUnits = newBoxes * 15
-                    val updateResp = api.patchProductionBatch(
-                        id = "eq.${alloc.inventoryId}",
-                        body = PatchProductionBatchRequest(
-                            expectedBoxes = newBoxes,
-                            expectedUnits = newUnits,
-                        ),
-                    )
-                    if (!updateResp.isSuccessful) {
-                        Log.w(TAG, "Production batch stock update failed for ${alloc.inventoryId}: ${updateResp.code()}")
+                    // 2. Deduct stock from production_batches — NON-FATAL: data is saved, log and continue
+                    try {
+                        val newBoxes = alloc.availableUnits - alloc.unitsToTake
+                        val patchResp = api.patchProductionBatch(
+                            id = "eq.${alloc.inventoryId}",
+                            body = PatchProductionBatchRequest(
+                                expectedBoxes = newBoxes,
+                                expectedUnits = newBoxes * 15,
+                            ),
+                        )
+                        if (patchResp.code() !in 200..204) {
+                            Log.w(TAG, "patchProductionBatch non-fatal [${patchResp.code()}] for ${alloc.inventoryId}")
+                        } else {
+                            Log.d(TAG, "patchProductionBatch success [${patchResp.code()}] for ${alloc.inventoryId}")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "patchProductionBatch threw (non-fatal) for ${alloc.inventoryId}: ${e.message}")
                     }
                 }
 
-                // 3. Update invoice status
+                // 3. Update invoice status — NON-FATAL: data is saved, log and continue
                 if (isPacked || isDispatched) {
-                    val now = java.time.Instant.now().toString()
-                    api.updateInvoiceStatus(
-                        invoiceId = "eq.$invoiceId",
-                        body = UpdateInvoiceStatusRequest(
-                            isPacked = if (isPacked) true else null,
-                            packedAt = if (isPacked) now else null,
-                            isDispatched = if (isDispatched) true else null,
-                            dispatchedAt = if (isDispatched) now else null,
-                        ),
-                    )
+                    try {
+                        val now = java.time.Instant.now().toString()
+                        val statusResp = api.updateInvoiceStatus(
+                            invoiceId = "eq.$invoiceId",
+                            body = UpdateInvoiceStatusRequest(
+                                isPacked = if (isPacked) true else null,
+                                packedAt = if (isPacked) now else null,
+                                isDispatched = if (isDispatched) true else null,
+                                dispatchedAt = if (isDispatched) now else null,
+                            ),
+                        )
+                        if (statusResp.code() !in 200..204) {
+                            Log.w(TAG, "updateInvoiceStatus non-fatal [${statusResp.code()}] for invoice $invoiceId")
+                        } else {
+                            Log.d(TAG, "updateInvoiceStatus success [${statusResp.code()}] for invoice $invoiceId")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "updateInvoiceStatus threw (non-fatal) for invoice $invoiceId: ${e.message}")
+                    }
                 }
             }
         } else {
