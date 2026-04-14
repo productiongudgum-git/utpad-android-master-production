@@ -347,3 +347,24 @@ data class SkuStockDto(
     @SerialName("sku_code") val skuCode: String,
     @SerialName("boxes_available") val boxesAvailable: Int,
 )
+
+// ── Raw Material Inventory (inventory_raw_materials) ──────────────
+@Serializable
+data class RawMaterialStockDto(
+    @SerialName("ingredient_id") val ingredientId: String,
+    @SerialName("current_qty") val currentQty: Double,
+    val unit: String,
+    @SerialName("low_stock_threshold") val lowStockThreshold: Double? = null,
+)
+
+@Serializable
+data class RawMaterialStockInsertRequest(
+    @SerialName("ingredient_id") val ingredientId: String,
+    @SerialName("current_qty") val currentQty: Double,
+    val unit: String,
+)
+
+@Serializable
+data class RawMaterialStockUpdateRequest(
+    @SerialName("current_qty") val currentQty: Double,
+)

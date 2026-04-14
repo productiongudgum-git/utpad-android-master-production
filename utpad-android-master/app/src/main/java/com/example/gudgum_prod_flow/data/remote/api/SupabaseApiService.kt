@@ -213,4 +213,24 @@ interface SupabaseApiService {
         @Body body: PatchProductionBatchRequest,
         @Header("Prefer") prefer: String = "return=minimal",
     ): Response<Unit>
+
+    // ── Raw Material Inventory (inventory_raw_materials) ───────────
+    @GET("rest/v1/inventory_raw_materials")
+    suspend fun getRawMaterialStock(
+        @Query("ingredient_id") ingredientId: String,
+        @Query("select") select: String = "ingredient_id,current_qty,unit,low_stock_threshold",
+    ): Response<List<RawMaterialStockDto>>
+
+    @PATCH("rest/v1/inventory_raw_materials")
+    suspend fun updateRawMaterialStock(
+        @Query("ingredient_id") ingredientId: String,
+        @Body body: RawMaterialStockUpdateRequest,
+        @Header("Prefer") prefer: String = "return=minimal",
+    ): Response<Unit>
+
+    @POST("rest/v1/inventory_raw_materials")
+    suspend fun insertRawMaterialStock(
+        @Body body: RawMaterialStockInsertRequest,
+        @Header("Prefer") prefer: String = "return=minimal",
+    ): Response<Unit>
 }

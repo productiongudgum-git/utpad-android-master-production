@@ -14,6 +14,8 @@ import com.example.gudgum_prod_flow.data.remote.dto.GgInwardingRequest
 import com.example.gudgum_prod_flow.data.remote.dto.GgIngredientInsertRequest
 import com.example.gudgum_prod_flow.data.remote.dto.GgVendorDto
 import com.example.gudgum_prod_flow.data.remote.dto.GgVendorInsertRequest
+import com.example.gudgum_prod_flow.data.remote.dto.RawMaterialStockInsertRequest
+import com.example.gudgum_prod_flow.data.remote.dto.RawMaterialStockUpdateRequest
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitOperationEventRequest
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitReturnEventRequest
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
@@ -73,6 +75,28 @@ class InwardingRepository @Inject constructor(
                 if (!response.isSuccessful && response.code() != 201) {
                     val body = response.errorBody()?.string() ?: ""
                     error("Inward event insert failed: ${response.code()} | $body")
+                }
+
+                // Update inventory_raw_materials: increment if exists, insert if not
+                runCatching {
+                    val stockResponse = api.getRawMaterialStock("eq.${request.ingredientId}")
+                    val existing = stockResponse.body()?.firstOrNull()
+                    if (existing != null) {
+                        api.updateRawMaterialStock(
+                            ingredientId = "eq.${request.ingredientId}",
+                            body = RawMaterialStockUpdateRequest(currentQty = existing.currentQty + request.qty),
+                        )
+                    } else {
+                        api.insertRawMaterialStock(
+                            body = RawMaterialStockInsertRequest(
+                                ingredientId = request.ingredientId,
+                                currentQty = request.qty,
+                                unit = request.unit,
+                            ),
+                        )
+                    }
+                }.onFailure { error ->
+                    Log.w(TAG, "inventory_raw_materials update failed after inward save", error)
                 }
 
                 runCatching {
