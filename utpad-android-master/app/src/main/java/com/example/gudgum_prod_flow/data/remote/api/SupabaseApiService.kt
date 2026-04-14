@@ -179,6 +179,7 @@ interface SupabaseApiService {
     @GET("rest/v1/production_batches")
     suspend fun getProductionBatchesByFlavor(
         @Query("flavor_id") flavorId: String,
+        @Query("expected_boxes") expectedBoxes: String = "gt.0",
         @Query("order") order: String = "production_date.asc",
         @Query("select") select: String = "id,batch_code,flavor_id,production_date,expected_boxes,expected_units",
     ): Response<List<ProductionBatchFifoDto>>
