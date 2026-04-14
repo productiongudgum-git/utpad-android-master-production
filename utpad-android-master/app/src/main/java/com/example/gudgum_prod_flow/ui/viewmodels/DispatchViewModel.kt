@@ -52,9 +52,9 @@ class DispatchViewModel @Inject constructor(
     private val _selectedItem = MutableStateFlow<InvoiceItemDto?>(null)
     val selectedItem: StateFlow<InvoiceItemDto?> = _selectedItem.asStateFlow()
 
-    // ── Step 4: Units + FIFO allocation ────────────────────────────
-    private val _unitsToDispatch = MutableStateFlow("")
-    val unitsToDispatch: StateFlow<String> = _unitsToDispatch.asStateFlow()
+    // ── Step 4: Boxes + FIFO allocation ────────────────────────────
+    private val _boxesToDispatch = MutableStateFlow("")
+    val boxesToDispatch: StateFlow<String> = _boxesToDispatch.asStateFlow()
 
     private val _fifoLines = MutableStateFlow<List<FifoDisplayLine>>(emptyList())
     val fifoLines: StateFlow<List<FifoDisplayLine>> = _fifoLines.asStateFlow()
@@ -122,7 +122,7 @@ class DispatchViewModel @Inject constructor(
         _selectedInvoice.value = invoice
         _selectedItem.value = null
         _fifoLines.value = emptyList()
-        _unitsToDispatch.value = ""
+        _boxesToDispatch.value = ""
 
         // Parse items from invoice's JSON items column (no separate table)
         _invoiceItems.value = invoice.items.map { jsonItem ->
@@ -145,7 +145,7 @@ class DispatchViewModel @Inject constructor(
     fun onItemSelected(item: InvoiceItemDto) {
         _selectedItem.value = item
         _fifoLines.value = emptyList()
-        _unitsToDispatch.value = item.quantityUnits.toString()
+        _boxesToDispatch.value = (item.quantityUnits / 15).toString()
 
         // Load inventory for this flavor
         viewModelScope.launch {
@@ -163,14 +163,14 @@ class DispatchViewModel @Inject constructor(
 
     // ── Step 4 ─────────────────────────────────────────────────────
 
-    fun onUnitsChanged(value: String) {
-        _unitsToDispatch.value = value
+    fun onBoxesChanged(value: String) {
+        _boxesToDispatch.value = value
         computeFifo()
     }
 
     /** FIFO allocation: sort batches by production_date ASC (oldest first), allocate from expected_boxes */
     private fun computeFifo() {
-        val needed = _unitsToDispatch.value.toIntOrNull() ?: 0
+        val needed = _boxesToDispatch.value.toIntOrNull() ?: 0
         if (needed <= 0) {
             _fifoLines.value = emptyList()
             _fifoError.value = null
@@ -264,9 +264,9 @@ class DispatchViewModel @Inject constructor(
             )
 
             result.onSuccess {
-                val totalUnits = lines.sumOf { it.unitsToTake }
+                val totalBoxes = lines.sumOf { it.unitsToTake }
                 _submitState.value = SubmitState.Success(
-                    if (isOnline) "Dispatched $totalUnits units for invoice ${invoice.invoiceNumber}"
+                    if (isOnline) "Dispatched $totalBoxes boxes for invoice ${invoice.invoiceNumber}"
                     else "Dispatch saved offline — will sync when connected"
                 )
                 reset()
@@ -300,7 +300,7 @@ class DispatchViewModel @Inject constructor(
         _selectedInvoice.value = null
         _invoiceItems.value = emptyList()
         _selectedItem.value = null
-        _unitsToDispatch.value = ""
+        _boxesToDispatch.value = ""
         _fifoLines.value = emptyList()
         _fifoError.value = null
         _inventoryForFlavor.value = emptyList()

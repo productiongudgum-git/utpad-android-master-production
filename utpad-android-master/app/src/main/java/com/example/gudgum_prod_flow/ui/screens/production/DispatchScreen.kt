@@ -88,7 +88,7 @@ fun DispatchScreen(
     val selectedInvoice by viewModel.selectedInvoice.collectAsState()
     val invoiceItems by viewModel.invoiceItems.collectAsState()
     val selectedItem by viewModel.selectedItem.collectAsState()
-    val unitsToDispatch by viewModel.unitsToDispatch.collectAsState()
+    val boxesToDispatch by viewModel.boxesToDispatch.collectAsState()
     val fifoLines by viewModel.fifoLines.collectAsState()
     val fifoError by viewModel.fifoError.collectAsState()
     val isPacked by viewModel.isPacked.collectAsState()
@@ -161,7 +161,7 @@ fun DispatchScreen(
                         1 -> "Select Invoice"
                         2 -> "Customer Info"
                         3 -> "Select Flavour"
-                        4 -> "Units & FIFO"
+                        4 -> "Boxes & FIFO"
                         else -> "Confirm"
                     }
                 )
@@ -266,7 +266,7 @@ fun DispatchScreen(
                                                 fontWeight = FontWeight.SemiBold,
                                             )
                                             Text(
-                                                text = "${item.quantityUnits} units",
+                                                text = "${item.quantityUnits / 15} boxes",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = UtpadPrimary,
                                                 fontWeight = FontWeight.Bold,
@@ -323,7 +323,7 @@ fun DispatchScreen(
                                                 )
                                             }
                                             Text(
-                                                text = "${item.quantityUnits} units",
+                                                text = "${item.quantityUnits / 15} boxes",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = if (isSelected) UtpadPrimary else UtpadTextSecondary,
@@ -347,16 +347,16 @@ fun DispatchScreen(
                                 verticalArrangement = Arrangement.spacedBy(14.dp),
                             ) {
                                 Text(
-                                    text = "UNITS TO DISPATCH",
+                                    text = "BOXES TO DISPATCH",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = UtpadTextSecondary,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 OutlinedTextField(
-                                    value = unitsToDispatch,
-                                    onValueChange = viewModel::onUnitsChanged,
+                                    value = boxesToDispatch,
+                                    onValueChange = viewModel::onBoxesChanged,
                                     placeholder = { Text("0", color = UtpadTextSecondary) },
-                                    suffix = { Text("units", color = UtpadTextSecondary) },
+                                    suffix = { Text("boxes", color = UtpadTextSecondary) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
@@ -477,7 +477,7 @@ fun DispatchScreen(
                                     color = UtpadTextPrimary,
                                 )
                                 Text(
-                                    text = "Units: $unitsToDispatch across ${fifoLines.size} batch(es)",
+                                    text = "Boxes: $boxesToDispatch across ${fifoLines.size} batch(es)",
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = UtpadPrimary,
