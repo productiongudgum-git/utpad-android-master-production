@@ -56,7 +56,7 @@ data class SubmitProductionBatchRequest(
 data class ProductionBatchDto(
     val id: String? = null,
     @SerialName("batch_code") val batchCode: String,
-    @SerialName("sku_id") val skuId: String,
+    @SerialName("sku_id") val skuId: String? = null,
     @SerialName("flavor_id") val flavorId: String? = null,
     @SerialName("recipe_id") val recipeId: String? = null,
     @SerialName("production_date") val productionDate: String,

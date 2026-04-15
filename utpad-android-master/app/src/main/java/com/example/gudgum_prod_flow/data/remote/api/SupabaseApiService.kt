@@ -112,7 +112,7 @@ interface SupabaseApiService {
         @Query("batch_code") batchCode: String,
         @Query("flavor_id") flavorId: String,
         @Query("select") select: String = "id,batch_code,flavor_id,batch_number,expected_boxes,production_date",
-        @Query("order") order: String = "batch_number.asc",
+        @Query("order") order: String = "production_date.asc",
     ): Response<List<ProductionBatchDto>>
 
     // ── Packing Sessions (packing_sessions) ────────────────────────
