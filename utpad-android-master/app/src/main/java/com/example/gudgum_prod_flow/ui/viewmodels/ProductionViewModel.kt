@@ -48,6 +48,11 @@ class ProductionViewModel @Inject constructor(
     private val _batchCode = MutableStateFlow(BatchCodeGenerator.generate())
     val batchCode: StateFlow<String> = _batchCode.asStateFlow()
 
+    // Previewed batch number shown in Step 1 once a flavor is selected.
+    // null = not yet computed (flavor not selected or still loading).
+    private val _previewBatchNumber = MutableStateFlow<Int?>(null)
+    val previewBatchNumber: StateFlow<Int?> = _previewBatchNumber.asStateFlow()
+
     private val _manufacturingDate = MutableStateFlow(
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
     )
@@ -61,16 +66,30 @@ class ProductionViewModel @Inject constructor(
     // The actual recipe UUID returned from gg_recipes
     private var selectedRecipeId: String? = null
 
-    // Total input weight = sum of all ingredient actualQty values (recalculates in real time)
+    // ── Unit conversion helpers ──────────────────────────────────────────────
+    // Returns the multiplier to convert a quantity in `unit` → kg.
+    private fun toKgFactor(unit: String): Double = when (unit.lowercase().trim()) {
+        "g", "gram", "grams" -> 0.001
+        "kg", "kgs", "kilogram", "kilograms" -> 1.0
+        "ml", "milliliter", "millilitre", "milliliters", "millilitres" -> 0.001
+        "l", "liter", "litre", "liters", "litres" -> 1.0
+        else -> 1.0  // treat unknown units as kg
+    }
+
+    private fun ingredientToKg(ingredient: RecipeIngredient): Double =
+        (ingredient.actualQty.toDoubleOrNull() ?: 0.0) * toKgFactor(ingredient.unit)
+
+    // ── Derived totals (update in real time as quantities are edited) ────────
+    // Total input weight in kg, using per-ingredient unit conversion.
     val totalInputWeight: StateFlow<Double> = _recipe
-        .map { ingredients -> ingredients.sumOf { it.actualQty.toDoubleOrNull() ?: 0.0 } }
+        .map { ingredients -> ingredients.sumOf { ingredientToKg(it) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0.0)
 
-    // Expected boxes = floor(totalInputWeight / 0.021), recalculates in real time
+    // Expected boxes = floor(totalInputWeightKg / 0.021)
     val expectedBoxesFromInput: StateFlow<Int> = _recipe
         .map { ingredients ->
-            val total = ingredients.sumOf { it.actualQty.toDoubleOrNull() ?: 0.0 }
-            (total / 0.021).toInt()
+            val totalKg = ingredients.sumOf { ingredientToKg(it) }
+            (totalKg / 0.021).toInt()
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
@@ -120,7 +139,11 @@ class ProductionViewModel @Inject constructor(
                             }
                         }
                     }
-                    "production_batches" -> repository.refreshOpenBatches()
+                    // Refresh batch number preview if production_batches table changes
+                    "production_batches" -> {
+                        repository.refreshOpenBatches()
+                        refreshBatchNumber()
+                    }
                 }
             }
         }
@@ -132,10 +155,22 @@ class ProductionViewModel @Inject constructor(
         viewModelScope.launch { repository.refreshFlavors() }
     }
 
+    // Queries the DB to compute what the next batch_number will be for the
+    // current batchCode + selectedFlavor combination, and caches it for display.
+    private fun refreshBatchNumber() {
+        val flavor = _selectedFlavor.value ?: return
+        val code = _batchCode.value
+        viewModelScope.launch {
+            val count = repository.countBatchesForCodeAndFlavor(code, flavor.id).getOrDefault(0)
+            _previewBatchNumber.value = count + 1
+        }
+    }
+
     fun onFlavorSelected(flavor: FlavorProfile) {
         _selectedFlavor.value = flavor
         _recipe.value = emptyList()
         baseRecipeIngredients = emptyList()
+        _previewBatchNumber.value = null  // show loading state while we query
 
         val recipeKey = flavor.recipeId ?: flavor.id
         viewModelScope.launch {
@@ -159,6 +194,8 @@ class ProductionViewModel @Inject constructor(
                 _recipe.value = ingredients
             }
         }
+        // Fetch batch number preview in parallel
+        refreshBatchNumber()
     }
 
     fun onActualQtyChanged(index: Int, value: String) {
@@ -208,12 +245,12 @@ class ProductionViewModel @Inject constructor(
             val recipeKey = selectedRecipeId ?: flavor.id
             val actualYieldKg = _actualOutput.value.toDoubleOrNull()
 
-            // Compute totals from recipe ingredient quantities
-            val totalInputKg = _recipe.value.sumOf { it.actualQty.toDoubleOrNull() ?: 0.0 }
+            // Convert all ingredient quantities to kg before computing totals
+            val totalInputKg = _recipe.value.sumOf { ingredientToKg(it) }
             val expectedBoxes = (totalInputKg / 0.021).toInt()
             val expectedUnits = expectedBoxes * 15
 
-            // Auto-generate batch_number: count existing batches for this code + flavor
+            // Re-query batch count at submission time for accuracy
             val existingCount = repository.countBatchesForCodeAndFlavor(batchCode, flavor.id)
                 .getOrDefault(0)
             val batchNumber = existingCount + 1
@@ -249,6 +286,7 @@ class ProductionViewModel @Inject constructor(
     fun reset() {
         _selectedFlavor.value = null
         _batchCode.value = BatchCodeGenerator.generate()
+        _previewBatchNumber.value = null
         _recipe.value = emptyList()
         baseRecipeIngredients = emptyList()
         selectedRecipeId = null

@@ -83,6 +83,7 @@ fun ProductionScreen(
 ) {
     val selectedFlavor by viewModel.selectedFlavor.collectAsState()
     val batchCode by viewModel.batchCode.collectAsState()
+    val previewBatchNumber by viewModel.previewBatchNumber.collectAsState()
     val recipe by viewModel.recipe.collectAsState()
     val totalInputWeight by viewModel.totalInputWeight.collectAsState()
     val expectedBoxesFromInput by viewModel.expectedBoxesFromInput.collectAsState()
@@ -197,7 +198,7 @@ fun ProductionScreen(
                                     )
                                 }
 
-                                // Batch Code (read-only, auto-generated)
+                                // Batch Code + Batch Number (read-only, auto-generated)
                                 Column {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -242,6 +243,42 @@ fun ProductionScreen(
                                         ),
                                         shape = RoundedCornerShape(16.dp),
                                     )
+
+                                    // Batch number preview — updates once a flavor is selected
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = when {
+                                            previewBatchNumber != null -> UtpadPrimary.copy(alpha = 0.08f)
+                                            else -> UtpadBackground
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(
+                                                text = "BATCH NUMBER",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = UtpadTextSecondary,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                            Text(
+                                                text = when {
+                                                    selectedFlavor == null -> "Select a flavor first"
+                                                    previewBatchNumber == null -> "Loading..."
+                                                    else -> "Batch $previewBatchNumber"
+                                                },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (previewBatchNumber != null) UtpadPrimary else UtpadTextSecondary,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -269,7 +306,7 @@ fun ProductionScreen(
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     Text(
-                                        text = "QTY (KG)",
+                                        text = "QUANTITY",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = UtpadTextSecondary,
                                         fontWeight = FontWeight.SemiBold
@@ -277,7 +314,7 @@ fun ProductionScreen(
                                 }
                                 HorizontalDivider(color = UtpadOutline)
 
-                                // Ingredient rows
+                                // Ingredient rows — each field shows the original recipe unit
                                 recipe.forEachIndexed { index, ingredient ->
                                     Row(
                                         modifier = Modifier
@@ -298,6 +335,13 @@ fun ProductionScreen(
                                             onValueChange = { viewModel.onRecipeQuantityChanged(index, it) },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                             singleLine = true,
+                                            suffix = {
+                                                Text(
+                                                    ingredient.unit,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = UtpadTextSecondary,
+                                                )
+                                            },
                                             textStyle = MaterialTheme.typography.bodyLarge.copy(
                                                 textAlign = TextAlign.End,
                                                 fontWeight = FontWeight.Bold,
@@ -309,7 +353,7 @@ fun ProductionScreen(
                                                 unfocusedContainerColor = UtpadSurface,
                                             ),
                                             shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.weight(0.5f),
+                                            modifier = Modifier.weight(0.55f),
                                         )
                                     }
                                     if (index < recipe.lastIndex) {
