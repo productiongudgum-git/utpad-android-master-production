@@ -144,7 +144,8 @@ fun ProductionScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp)
-                    .padding(bottom = 80.dp),
+                    // Step 2 bottom bar is taller (totals + buttons), so give more clearance
+                    .padding(bottom = if (currentStep == 2) 180.dp else 100.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
             ) {
                 Spacer(modifier = Modifier.height(4.dp))
@@ -319,51 +320,6 @@ fun ProductionScreen(
                                     }
                                 }
 
-                                // Totals footer
-                                HorizontalDivider(color = UtpadOutline)
-                                Surface(color = UtpadBackground) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                        ) {
-                                            Text(
-                                                text = "Total Input Weight (kg)",
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                fontWeight = FontWeight.Bold,
-                                                color = UtpadPrimary,
-                                            )
-                                            Text(
-                                                text = "%.3f kg".format(totalInputWeight),
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                fontWeight = FontWeight.Bold,
-                                                color = UtpadPrimary,
-                                            )
-                                        }
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                        ) {
-                                            Text(
-                                                text = "Expected Boxes",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = UtpadTextSecondary,
-                                            )
-                                            Text(
-                                                text = "$expectedBoxesFromInput boxes",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = UtpadTextSecondary,
-                                            )
-                                        }
-                                    }
-                                }
                             }
                         }
                     } // End step 2
@@ -477,7 +433,7 @@ fun ProductionScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // Bottom action buttons
+            // Bottom action bar — also shows step 2 totals pinned above buttons
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -486,9 +442,58 @@ fun ProductionScreen(
                 color = UtpadSurface,
                 shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
             ) {
-                Column(modifier = Modifier.padding(24.dp)) {
+                Column {
+                    // Pinned totals summary for step 2
+                    if (currentStep == 2) {
+                        HorizontalDivider(color = UtpadOutline)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "Total Input Weight",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = UtpadPrimary,
+                                )
+                                Text(
+                                    text = "%.3f kg".format(totalInputWeight),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = UtpadPrimary,
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "Expected Boxes",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = UtpadTextSecondary,
+                                )
+                                Text(
+                                    text = "$expectedBoxesFromInput boxes",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = UtpadTextSecondary,
+                                )
+                            }
+                        }
+                        HorizontalDivider(color = UtpadOutline)
+                    }
+
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         androidx.compose.material3.OutlinedButton(
@@ -527,15 +532,6 @@ fun ProductionScreen(
                                 if (currentStep < 3) "Continue" else "Confirm & Save",
                                 fontWeight = FontWeight.Bold
                             )
-                        }
-                    }
-                    if (AppRoute.Packing in allowedRoutes) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        TextButton(
-                            onClick = { onNavigateToRoute(AppRoute.Packing) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("Continue to Packing", color = UtpadPrimary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

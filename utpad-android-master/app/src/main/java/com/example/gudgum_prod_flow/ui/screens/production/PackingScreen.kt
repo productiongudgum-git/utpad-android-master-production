@@ -497,15 +497,6 @@ fun PackingScreen(
                             )
                         }
                     }
-                    if (AppRoute.Dispatch in allowedRoutes) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        TextButton(
-                            onClick = { onNavigateToRoute(AppRoute.Dispatch) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("Continue to Dispatch", color = UtpadPrimary, fontWeight = FontWeight.Bold)
-                        }
-                    }
                 }
             }
         }

@@ -164,14 +164,30 @@ class ProductionRepository @Inject constructor(
                     batchNumber = batchNumber,
                 )
 
-                Log.d(TAG, "Saving production batch batch_code=$batchCode flavor_id=$skuId recipe_id=$recipeId")
+                Log.d(TAG, buildString {
+                    append("Submitting production batch:")
+                    append(" batch_code=$batchCode")
+                    append(" flavor_id=$skuId")
+                    append(" recipe_id=$recipeId")
+                    append(" production_date=$productionDate")
+                    append(" worker_id=$workerId")
+                    append(" planned_yield=$plannedYield")
+                    append(" actual_yield=$actualYield")
+                    append(" expected_boxes=$expectedBoxes")
+                    append(" expected_units=$expectedUnits")
+                    append(" batch_number=$batchNumber")
+                })
 
                 val batchResp = api.insertProductionBatch(request)
                 val batchError = batchResp.errorBody()?.string().orEmpty()
-                Log.d(TAG, "Production save status=${batchResp.code()} body=${if (batchError.isBlank()) "<empty>" else batchError}")
+                Log.d(TAG, "Production save HTTP ${batchResp.code()} — ${if (batchError.isBlank()) "no error body" else batchError}")
 
-                if (!batchResp.isSuccessful && batchResp.code() != 201) {
-                    error("Unable to save the production batch right now. Please try again.")
+                if (!batchResp.isSuccessful) {
+                    val msg = when {
+                        batchError.isNotBlank() -> batchError
+                        else -> "HTTP ${batchResp.code()}"
+                    }
+                    error("Production batch save failed: $msg")
                 }
             }
         } else {
