@@ -190,6 +190,13 @@ interface SupabaseApiService {
         @Query("select") select: String = "batch_code,boxes_dispatched",
     ): Response<List<DispatchEventFifoDto>>
 
+    // ── Dispatch events by invoice — for delta (edited invoice) calc ──
+    @GET("rest/v1/dispatch_events")
+    suspend fun getDispatchEventsByInvoice(
+        @Query("invoice_id") invoiceId: String,
+        @Query("select") select: String = "flavor_id,batch_code,boxes_dispatched",
+    ): Response<List<DispatchEventFifoDto>>
+
     // ── Update invoice status ──────────────────────────────────────
     @PATCH("rest/v1/gg_invoices")
     suspend fun updateInvoiceStatus(

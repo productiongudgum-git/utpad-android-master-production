@@ -273,6 +273,7 @@ data class PackingSessionFifoDto(
 data class DispatchEventFifoDto(
     @SerialName("batch_code") val batchCode: String,
     @SerialName("boxes_dispatched") val boxesDispatched: Int = 0,
+    @SerialName("flavor_id") val flavorId: String? = null,
 )
 
 // ── Gg_ table DTOs ────────────────────────────────────────────────

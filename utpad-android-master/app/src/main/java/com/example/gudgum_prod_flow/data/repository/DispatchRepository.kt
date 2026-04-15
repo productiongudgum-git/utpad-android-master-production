@@ -111,6 +111,26 @@ class DispatchRepository @Inject constructor(
     }
 
     /**
+     * Returns already-dispatched boxes per flavor_id for a specific invoice.
+     * Used to compute delta when an invoice is edited after partial dispatch.
+     * Map key = flavorId, value = total boxes already dispatched for that flavor on this invoice.
+     */
+    suspend fun getAlreadyDispatchedPerFlavor(invoiceId: String): Result<Map<String, Int>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val resp = api.getDispatchEventsByInvoice(invoiceId = "eq.$invoiceId")
+            val events = if (resp.isSuccessful) resp.body() ?: emptyList()
+                         else {
+                             Log.w(TAG, "getDispatchEventsByInvoice failed [${resp.code()}]")
+                             emptyList()
+                         }
+            events
+                .groupBy { it.flavorId.orEmpty() }
+                .filterKeys { it.isNotEmpty() }
+                .mapValues { (_, es) -> es.sumOf { it.boxesDispatched } }
+        }
+    }
+
+    /**
      * Submit a FIFO dispatch: creates dispatch_events for each FIFO allocation line,
      * deducts inventory, and optionally updates invoice packed/dispatched status.
      */

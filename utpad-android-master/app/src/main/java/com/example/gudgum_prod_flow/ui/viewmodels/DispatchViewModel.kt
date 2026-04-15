@@ -83,6 +83,9 @@ class DispatchViewModel @Inject constructor(
     private val _invoiceAlreadyPacked = MutableStateFlow(false)
     val invoiceAlreadyPacked: StateFlow<Boolean> = _invoiceAlreadyPacked.asStateFlow()
 
+    // ── FIX 1: already-dispatched boxes per flavor for this invoice (delta calc) ──
+    private val _alreadyDispatchedPerFlavor = MutableStateFlow<Map<String, Int>>(emptyMap())
+
     // ── FIX 2: stock availability check before Step 5 submit ───────
     private val _stockCheckError = MutableStateFlow<String?>(null)
     val stockCheckError: StateFlow<String?> = _stockCheckError.asStateFlow()
@@ -139,25 +142,35 @@ class DispatchViewModel @Inject constructor(
         _boxesToDispatch.value = ""
         _stockCheckError.value = null
 
-        // Parse items from invoice's JSON items column (no separate table)
-        _invoiceItems.value = invoice.items.map { jsonItem ->
-            InvoiceItemDto(
-                id = "",
-                invoiceId = invoice.id,
-                flavorId = jsonItem.flavorId,
-                quantityUnits = jsonItem.quantityUnits,
-                quantityBoxes = jsonItem.quantityBoxes,
-                flavor = FlavorJoinDto(
-                    id = jsonItem.flavorId,
-                    name = jsonItem.flavorName,
-                    code = "",
-                ),
-            )
-        }
+        // FIX 2: merge duplicate flavors by summing their boxes before building item list
+        _invoiceItems.value = invoice.items
+            .groupBy { it.flavorId }
+            .map { (flavorId, group) ->
+                InvoiceItemDto(
+                    id = "",
+                    invoiceId = invoice.id,
+                    flavorId = flavorId,
+                    quantityUnits = group.sumOf { it.quantityUnits },
+                    quantityBoxes = group.mapNotNull { it.quantityBoxes }.takeIf { it.isNotEmpty() }?.sum(),
+                    flavor = FlavorJoinDto(
+                        id = flavorId,
+                        name = group.first().flavorName,
+                        code = "",
+                    ),
+                )
+            }
 
         // FIX 1: if already packed, pre-tick the checkbox so Step 5 validation passes
         _invoiceAlreadyPacked.value = invoice.isPacked
         _isPacked.value = invoice.isPacked
+
+        // FIX 1: fetch already-dispatched boxes per flavor so delta can be computed in onItemSelected()
+        _alreadyDispatchedPerFlavor.value = emptyMap()
+        viewModelScope.launch {
+            repository.getAlreadyDispatchedPerFlavor(invoice.id)
+                .onSuccess { map -> _alreadyDispatchedPerFlavor.value = map }
+                .onFailure { Log.w(TAG, "getAlreadyDispatchedPerFlavor failed: ${it.message}") }
+        }
     }
 
     // ── Step 3 ─────────────────────────────────────────────────────
@@ -165,7 +178,11 @@ class DispatchViewModel @Inject constructor(
     fun onItemSelected(item: InvoiceItemDto) {
         _selectedItem.value = item
         _fifoLines.value = emptyList()
-        _boxesToDispatch.value = item.resolvedBoxes.toString()
+
+        // FIX 1: only allocate FIFO for the delta (new boxes beyond what's already dispatched)
+        val alreadyDispatched = _alreadyDispatchedPerFlavor.value[item.flavorId] ?: 0
+        val delta = maxOf(0, item.resolvedBoxes - alreadyDispatched)
+        _boxesToDispatch.value = delta.toString()
 
         // Load inventory for this flavor
         viewModelScope.launch {
@@ -248,7 +265,9 @@ class DispatchViewModel @Inject constructor(
             var totalAvailable = 0
             var fetchFailed = false
             for (item in items) {
-                totalRequired += item.resolvedBoxes
+                // FIX 1: require only the delta, not the full invoice amount
+                val alreadyDispatched = _alreadyDispatchedPerFlavor.value[item.flavorId] ?: 0
+                totalRequired += maxOf(0, item.resolvedBoxes - alreadyDispatched)
                 repository.getInventoryByFlavor(item.flavorId)
                     .onSuccess { inventory -> totalAvailable += inventory.sumOf { it.expectedBoxes } }
                     .onFailure { fetchFailed = true }
@@ -440,6 +459,7 @@ class DispatchViewModel @Inject constructor(
         _submitState.value = SubmitState.Idle
         _currentWizardStep.value = 1
         _invoiceAlreadyPacked.value = false
+        _alreadyDispatchedPerFlavor.value = emptyMap()
         _stockCheckError.value = null
         _stockCheckLoading.value = false
     }
