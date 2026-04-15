@@ -54,12 +54,26 @@ class PackingRepository @Inject constructor(
     suspend fun getProductionBatches(batchCode: String, flavorId: String): Result<List<ProductionBatchDto>> =
         withContext(Dispatchers.IO) {
             runCatching {
+                Log.d(TAG, "getProductionBatches: querying batch_code=eq.$batchCode flavor_id=eq.$flavorId")
                 val response = api.getProductionBatchesByCodeAndFlavor(
                     batchCode = "eq.$batchCode",
                     flavorId = "eq.$flavorId",
                 )
-                if (response.isSuccessful) response.body() ?: emptyList() else emptyList()
-            }
+                val errorBody = if (!response.isSuccessful) response.errorBody()?.string().orEmpty() else ""
+                Log.d(TAG, "getProductionBatches: HTTP ${response.code()} rows=${response.body()?.size} error=${errorBody.ifBlank { "none" }}")
+                if (response.isSuccessful) {
+                    val batches = response.body() ?: emptyList()
+                    batches.forEach { b ->
+                        Log.d(TAG, "  batch id=${b.id} batch_number=${b.batchNumber} expected_boxes=${b.expectedBoxes} date=${b.productionDate}")
+                    }
+                    batches
+                } else {
+                    Log.e(TAG, "getProductionBatches: failed (${response.code()}) $errorBody")
+                    emptyList()
+                }
+            }.onFailure { e ->
+                Log.e(TAG, "getProductionBatches: exception ${e.message}")
+            }.map { it }
         }
 
     suspend fun submitPacking(

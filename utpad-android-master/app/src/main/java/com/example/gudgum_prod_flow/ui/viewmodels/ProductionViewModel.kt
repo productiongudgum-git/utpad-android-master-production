@@ -7,6 +7,7 @@ import com.example.gudgum_prod_flow.data.local.entity.CachedRecipeLineEntity
 import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
 import com.example.gudgum_prod_flow.data.repository.ProductionRepository
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
+import android.util.Log
 import com.example.gudgum_prod_flow.util.BatchCodeGenerator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +39,10 @@ class ProductionViewModel @Inject constructor(
     private val repository: ProductionRepository,
     private val realtimeManager: SupabaseRealtimeManager,
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "ProductionViewModel"
+    }
 
     private val _flavors = MutableStateFlow<List<FlavorProfile>>(emptyList())
     val flavors: StateFlow<List<FlavorProfile>> = _flavors.asStateFlow()
@@ -160,9 +165,12 @@ class ProductionViewModel @Inject constructor(
     private fun refreshBatchNumber() {
         val flavor = _selectedFlavor.value ?: return
         val code = _batchCode.value
+        Log.d(TAG, "refreshBatchNumber: batchCode=$code flavorId=${flavor.id} flavorName=${flavor.name}")
         viewModelScope.launch {
             val count = repository.countBatchesForCodeAndFlavor(code, flavor.id).getOrDefault(0)
-            _previewBatchNumber.value = count + 1
+            val next = count + 1
+            Log.d(TAG, "refreshBatchNumber: existingCount=$count → previewBatchNumber=$next")
+            _previewBatchNumber.value = next
         }
     }
 

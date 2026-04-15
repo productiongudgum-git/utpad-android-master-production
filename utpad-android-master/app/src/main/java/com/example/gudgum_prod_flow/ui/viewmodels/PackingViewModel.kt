@@ -1,5 +1,6 @@
 package com.example.gudgum_prod_flow.ui.viewmodels
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
@@ -36,6 +37,10 @@ class PackingViewModel @Inject constructor(
     private val repository: PackingRepository,
     private val realtimeManager: SupabaseRealtimeManager,
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "PackingViewModel"
+    }
 
     // Batch+flavor options from open production batches
     private val _batchFlavorOptions = MutableStateFlow<List<BatchFlavorOption>>(emptyList())
@@ -145,8 +150,15 @@ class PackingViewModel @Inject constructor(
     fun loadProductionBatches(batchCode: String, flavorId: String) {
         viewModelScope.launch {
             _productionBatchesLoading.value = true
+            Log.d(TAG, "loadProductionBatches: batchCode=$batchCode flavorId=$flavorId")
             val result = repository.getProductionBatches(batchCode, flavorId)
-            _productionBatches.value = result.getOrDefault(emptyList())
+            val batches = result.getOrDefault(emptyList())
+            Log.d(TAG, "loadProductionBatches: got ${batches.size} batches, batch_numbers=${batches.map { it.batchNumber }}")
+            // Assign sequential numbers as fallback for rows where batch_number is null
+            val batchesWithNumbers = batches.mapIndexed { index, batch ->
+                if (batch.batchNumber == null) batch.copy(batchNumber = index + 1) else batch
+            }
+            _productionBatches.value = batchesWithNumbers
             _selectedProductionBatch.value = null
             _productionBatchesLoading.value = false
         }

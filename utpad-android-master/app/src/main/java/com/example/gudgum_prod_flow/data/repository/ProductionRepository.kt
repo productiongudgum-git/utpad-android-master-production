@@ -120,11 +120,27 @@ class ProductionRepository @Inject constructor(
     suspend fun countBatchesForCodeAndFlavor(batchCode: String, flavorId: String): Result<Int> =
         withContext(Dispatchers.IO) {
             runCatching {
+                Log.d(TAG, "countBatches: querying batch_code=eq.$batchCode flavor_id=eq.$flavorId")
+                // Use a minimal select — deliberately excludes batch_number so the query
+                // succeeds even before that column is fully backfilled on older rows.
                 val response = api.getProductionBatchesByCodeAndFlavor(
                     batchCode = "eq.$batchCode",
                     flavorId = "eq.$flavorId",
+                    select = "id,batch_code,flavor_id,production_date",
+                    order = "production_date.asc",
                 )
-                if (response.isSuccessful) response.body()?.size ?: 0 else 0
+                val errorBody = if (!response.isSuccessful) response.errorBody()?.string().orEmpty() else ""
+                Log.d(TAG, "countBatches: HTTP ${response.code()} rows=${response.body()?.size} error=${errorBody.ifBlank { "none" }}")
+                if (response.isSuccessful) {
+                    val count = response.body()?.size ?: 0
+                    Log.d(TAG, "countBatches: existing=$count → next batch_number=${count + 1}")
+                    count
+                } else {
+                    Log.e(TAG, "countBatches: query failed (${response.code()}) $errorBody")
+                    0
+                }
+            }.onFailure { e ->
+                Log.e(TAG, "countBatches: exception ${e.message}")
             }
         }
 
