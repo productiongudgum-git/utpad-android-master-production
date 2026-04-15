@@ -9,11 +9,8 @@ import com.example.gudgum_prod_flow.data.repository.PackingRepository
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -47,7 +44,6 @@ class PackingViewModel @Inject constructor(
     private val _batchCodesLoading = MutableStateFlow(false)
     val batchCodesLoading: StateFlow<Boolean> = _batchCodesLoading.asStateFlow()
 
-    // Legacy — kept for backward compatibility with UI
     private val _batchCodes = MutableStateFlow<List<String>>(emptyList())
     val batchCodes: StateFlow<List<String>> = _batchCodes.asStateFlow()
 
@@ -57,16 +53,24 @@ class PackingViewModel @Inject constructor(
     private val _selectedBatchFlavor = MutableStateFlow<BatchFlavorOption?>(null)
     val selectedBatchFlavor: StateFlow<BatchFlavorOption?> = _selectedBatchFlavor.asStateFlow()
 
-    // Flavour selection
+    // Flavour selection (step 2)
     private val _flavors = MutableStateFlow<List<CachedFlavorEntity>>(emptyList())
     val flavors: StateFlow<List<CachedFlavorEntity>> = _flavors.asStateFlow()
 
     private val _selectedFlavor = MutableStateFlow<CachedFlavorEntity?>(null)
     val selectedFlavor: StateFlow<CachedFlavorEntity?> = _selectedFlavor.asStateFlow()
 
-    private val _qtyPacked = MutableStateFlow("")
-    val qtyPacked: StateFlow<String> = _qtyPacked.asStateFlow()
+    // Production batch selection (step 3)
+    private val _productionBatches = MutableStateFlow<List<ProductionBatchDto>>(emptyList())
+    val productionBatches: StateFlow<List<ProductionBatchDto>> = _productionBatches.asStateFlow()
 
+    private val _selectedProductionBatch = MutableStateFlow<ProductionBatchDto?>(null)
+    val selectedProductionBatch: StateFlow<ProductionBatchDto?> = _selectedProductionBatch.asStateFlow()
+
+    private val _productionBatchesLoading = MutableStateFlow(false)
+    val productionBatchesLoading: StateFlow<Boolean> = _productionBatchesLoading.asStateFlow()
+
+    // Packing output (step 4)
     private val _boxesMade = MutableStateFlow("")
     val boxesMade: StateFlow<String> = _boxesMade.asStateFlow()
 
@@ -130,12 +134,21 @@ class PackingViewModel @Inject constructor(
             _batchFlavorOptions.value = options
             _batchCodes.value = options.map { it.batchCode }.distinct()
 
-            // Default to first option
             if (_selectedBatchFlavor.value == null && options.isNotEmpty()) {
                 onBatchFlavorSelected(options.first())
             }
 
             _batchCodesLoading.value = false
+        }
+    }
+
+    fun loadProductionBatches(batchCode: String, flavorId: String) {
+        viewModelScope.launch {
+            _productionBatchesLoading.value = true
+            val result = repository.getProductionBatches(batchCode, flavorId)
+            _productionBatches.value = result.getOrDefault(emptyList())
+            _selectedProductionBatch.value = null
+            _productionBatchesLoading.value = false
         }
     }
 
@@ -146,17 +159,29 @@ class PackingViewModel @Inject constructor(
 
     fun onBatchCodeSelected(code: String) {
         _batchCode.value = code
-        // Find corresponding batch+flavor option
         val option = _batchFlavorOptions.value.firstOrNull { it.batchCode == code }
         _selectedBatchFlavor.value = option
     }
 
     fun onFlavorSelected(flavor: CachedFlavorEntity) { _selectedFlavor.value = flavor }
-    fun onQtyPackedChanged(value: String) { _qtyPacked.value = value }
+    fun onProductionBatchSelected(batch: ProductionBatchDto) { _selectedProductionBatch.value = batch }
     fun onBoxesMadeChanged(value: String) { _boxesMade.value = value }
     fun onPackingDateChanged(value: String) { _packingDate.value = value }
 
-    fun nextStep() { if (_currentWizardStep.value < 3) _currentWizardStep.value++ }
+    fun nextStep() {
+        if (_currentWizardStep.value < 4) {
+            // When advancing from step 2 → 3, load production batches for selected batch+flavor
+            if (_currentWizardStep.value == 2) {
+                val code = _batchCode.value
+                val flavorId = _selectedFlavor.value?.id
+                if (code.isNotBlank() && flavorId != null) {
+                    loadProductionBatches(code, flavorId)
+                }
+            }
+            _currentWizardStep.value++
+        }
+    }
+
     fun previousStep() { if (_currentWizardStep.value > 1) _currentWizardStep.value-- }
 
     fun submit() {
@@ -173,12 +198,16 @@ class PackingViewModel @Inject constructor(
             _submitState.value = SubmitState.Error("Select a flavour")
             return
         }
+        val productionBatch = _selectedProductionBatch.value
+        if (productionBatch == null) {
+            _submitState.value = SubmitState.Error("Select a batch number")
+            return
+        }
         val boxes = _boxesMade.value.toIntOrNull()
         if (boxes == null || boxes <= 0) {
             _submitState.value = SubmitState.Error("Enter a valid box count (> 0)")
             return
         }
-        val kgs = _qtyPacked.value.toDoubleOrNull()
         val unitsPacked = boxes * 15
 
         _submitState.value = SubmitState.Loading
@@ -187,20 +216,21 @@ class PackingViewModel @Inject constructor(
                 batchCode = code,
                 flavorId = flavor.id,
                 boxesPacked = boxes,
-                kgsPacked = kgs,
                 unitsPacked = unitsPacked,
                 packingDate = _packingDate.value,
                 workerId = WorkerIdentityStore.workerId,
                 isOnline = isOnline,
+                productionBatchId = productionBatch.id,
             )
             result.onSuccess {
+                val batchLabel = productionBatch.batchNumber?.let { "#$it" } ?: ""
                 _shiftSummary.value = ShiftSummary(
                     shift = "Current",
-                    totalPacked = _qtyPacked.value.ifBlank { boxes.toString() },
+                    totalPacked = boxes.toString(),
                     totalBoxes = boxes.toString(),
                 )
                 _submitState.value = SubmitState.Success(
-                    "Packed $boxes boxes ($unitsPacked units) for batch $code — ${flavor.name}"
+                    "Packed $boxes boxes ($unitsPacked units) for batch $code $batchLabel — ${flavor.name}"
                 )
                 clear()
             }
@@ -214,7 +244,8 @@ class PackingViewModel @Inject constructor(
         _selectedBatchFlavor.value = _batchFlavorOptions.value.firstOrNull()
         _batchCode.value = _selectedBatchFlavor.value?.batchCode ?: ""
         _selectedFlavor.value = null
-        _qtyPacked.value = ""
+        _productionBatches.value = emptyList()
+        _selectedProductionBatch.value = null
         _boxesMade.value = ""
         _packingDate.value = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         _submitState.value = SubmitState.Idle

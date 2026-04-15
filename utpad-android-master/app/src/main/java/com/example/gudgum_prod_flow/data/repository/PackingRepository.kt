@@ -51,15 +51,26 @@ class PackingRepository @Inject constructor(
         }
     }
 
+    suspend fun getProductionBatches(batchCode: String, flavorId: String): Result<List<ProductionBatchDto>> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val response = api.getProductionBatchesByCodeAndFlavor(
+                    batchCode = "eq.$batchCode",
+                    flavorId = "eq.$flavorId",
+                )
+                if (response.isSuccessful) response.body() ?: emptyList() else emptyList()
+            }
+        }
+
     suspend fun submitPacking(
         batchCode: String,
         flavorId: String?,
         boxesPacked: Int,
-        kgsPacked: Double?,
         unitsPacked: Int?,
         packingDate: String,
         workerId: String,
         isOnline: Boolean,
+        productionBatchId: String? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         if (isOnline) {
             runCatching {
@@ -69,8 +80,8 @@ class PackingRepository @Inject constructor(
                     sessionDate = packingDate,
                     workerId = workerId,
                     boxesPacked = boxesPacked,
-                    kgsPacked = kgsPacked,
                     unitsPacked = unitsPacked,
+                    productionBatchId = productionBatchId,
                 )
 
                 val response = api.insertPackingSession(request)
@@ -96,9 +107,9 @@ class PackingRepository @Inject constructor(
                             put("batch_code", batchCode)
                             put("flavor_id", flavorId ?: JSONObject.NULL)
                             put("boxes_packed", boxesPacked)
-                            put("kgs_packed", kgsPacked ?: JSONObject.NULL)
                             put("units_packed", unitsPacked ?: JSONObject.NULL)
                             put("session_date", packingDate)
+                            put("production_batch_id", productionBatchId ?: JSONObject.NULL)
                         }.toString(),
                     )
                 )

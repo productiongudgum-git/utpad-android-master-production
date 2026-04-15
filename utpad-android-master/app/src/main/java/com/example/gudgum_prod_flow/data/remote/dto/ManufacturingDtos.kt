@@ -49,6 +49,7 @@ data class SubmitProductionBatchRequest(
     @SerialName("expected_yield") val expectedYield: Double? = null,
     @SerialName("expected_boxes") val expectedBoxes: Int? = null,
     @SerialName("expected_units") val expectedUnits: Int? = null,
+    @SerialName("batch_number") val batchNumber: Int? = null,
 )
 
 @Serializable
@@ -64,6 +65,8 @@ data class ProductionBatchDto(
     @SerialName("planned_yield") val plannedYield: Double? = null,
     @SerialName("actual_yield") val actualYield: Double? = null,
     @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("batch_number") val batchNumber: Int? = null,
+    @SerialName("expected_boxes") val expectedBoxes: Int? = null,
     // Joined flavor
     val flavor: FlavorJoinDto? = null,
 )
@@ -85,6 +88,7 @@ data class SubmitPackingSessionRequest(
     @SerialName("boxes_packed") val boxesPacked: Int,
     @SerialName("kgs_packed") val kgsPacked: Double? = null,
     @SerialName("units_packed") val unitsPacked: Int? = null,
+    @SerialName("production_batch_id") val productionBatchId: String? = null,
 )
 
 @Serializable

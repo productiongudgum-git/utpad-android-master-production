@@ -21,34 +21,6 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
-data class BatchSizeConfig(
-    val units: Int,
-    val boxes: Int,
-    val gumsPerBox: Int,
-    val rawMaterialKg: Double,
-    val expectedYieldKg: Double,
-    val label: String,
-)
-
-val BATCH_SIZE_OPTIONS = listOf(
-    BatchSizeConfig(
-        units = 7500,
-        boxes = 500,
-        gumsPerBox = 15,
-        rawMaterialKg = 15.0,
-        expectedYieldKg = 10.5,
-        label = "7,500 Units",
-    ),
-    BatchSizeConfig(
-        units = 10000,
-        boxes = 667,
-        gumsPerBox = 15,
-        rawMaterialKg = 20.0,
-        expectedYieldKg = 14.0,
-        label = "10,000 Units",
-    ),
-)
-
 data class FlavorProfile(val id: String, val name: String, val code: String, val recipeId: String?)
 
 data class RecipeIngredient(
@@ -76,15 +48,6 @@ class ProductionViewModel @Inject constructor(
     private val _batchCode = MutableStateFlow(BatchCodeGenerator.generate())
     val batchCode: StateFlow<String> = _batchCode.asStateFlow()
 
-    // Fixed batch size selection (7,500 or 10,000 units).
-    private val _selectedBatchSize = MutableStateFlow<BatchSizeConfig?>(null)
-    val selectedBatchSize: StateFlow<BatchSizeConfig?> = _selectedBatchSize.asStateFlow()
-
-    // Backward-compatible string representation of batch size in kg.
-    val selectedBatchSizeKg: StateFlow<String> = _selectedBatchSize
-        .map { it?.rawMaterialKg?.let { v -> if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f".format(v) } ?: "" }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
-
     private val _manufacturingDate = MutableStateFlow(
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
     )
@@ -93,21 +56,23 @@ class ProductionViewModel @Inject constructor(
     private val _recipe = MutableStateFlow<List<RecipeIngredient>>(emptyList())
     val recipe: StateFlow<List<RecipeIngredient>> = _recipe.asStateFlow()
 
-    // Base (unscaled) ingredients from the recipe — keyed to the recipe's dashboard-defined yield_factor.
     private var baseRecipeIngredients: List<RecipeIngredient> = emptyList()
 
-    private val _plannedYield = MutableStateFlow<Double?>(null)
-    val plannedYield: StateFlow<Double?> = _plannedYield.asStateFlow()
-
-    // Base planned yield in kg as defined by gg_recipes.yield_factor.
-    private var basePlannedYieldKg: Double? = null
-
-    // The actual recipe UUID returned from gg_recipes, distinct from flavor/sku id
+    // The actual recipe UUID returned from gg_recipes
     private var selectedRecipeId: String? = null
 
-    val expectedYield: StateFlow<String> = _plannedYield
-        .map { it?.let { v -> "%.1f kg".format(v) } ?: "—" }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "—")
+    // Total input weight = sum of all ingredient actualQty values (recalculates in real time)
+    val totalInputWeight: StateFlow<Double> = _recipe
+        .map { ingredients -> ingredients.sumOf { it.actualQty.toDoubleOrNull() ?: 0.0 } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0.0)
+
+    // Expected boxes = floor(totalInputWeight / 0.021), recalculates in real time
+    val expectedBoxesFromInput: StateFlow<Int> = _recipe
+        .map { ingredients ->
+            val total = ingredients.sumOf { it.actualQty.toDoubleOrNull() ?: 0.0 }
+            (total / 0.021).toInt()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     private val _actualOutput = MutableStateFlow("")
     val actualOutput: StateFlow<String> = _actualOutput.asStateFlow()
@@ -124,7 +89,6 @@ class ProductionViewModel @Inject constructor(
     private var isOnline: Boolean = true
 
     init {
-        // Collect flavors from Room cache
         viewModelScope.launch {
             repository.getActiveFlavors().collect { entities ->
                 _flavors.value = entities.map {
@@ -137,7 +101,6 @@ class ProductionViewModel @Inject constructor(
                 }
             }
         }
-        // Eagerly refresh from Supabase gg_flavors
         viewModelScope.launch {
             repository.refreshFlavors()
         }
@@ -152,10 +115,8 @@ class ProductionViewModel @Inject constructor(
                         if (currentFlavor != null) {
                             val recipeKey = currentFlavor.recipeId ?: currentFlavor.id
                             val yieldResult = repository.refreshRecipeLines(recipeKey)
-                            yieldResult.onSuccess { (recipeId, yieldFactor) ->
+                            yieldResult.onSuccess { (recipeId, _) ->
                                 selectedRecipeId = recipeId
-                                basePlannedYieldKg = yieldFactor
-                                applyBatchSizeScale()
                             }
                         }
                     }
@@ -180,14 +141,12 @@ class ProductionViewModel @Inject constructor(
         viewModelScope.launch {
             if (isOnline) {
                 val yieldResult = repository.refreshRecipeLines(recipeKey)
-                yieldResult.onSuccess { (recipeId, yieldFactor) ->
+                yieldResult.onSuccess { (recipeId, _) ->
                     selectedRecipeId = recipeId
-                    basePlannedYieldKg = yieldFactor
-                    applyBatchSizeScale()
                 }
             }
             repository.getRecipeLines(recipeKey).collect { lines ->
-                baseRecipeIngredients = lines.map {
+                val ingredients = lines.map {
                     RecipeIngredient(
                         ingredientId = it.ingredientId,
                         name = it.ingredientName,
@@ -196,34 +155,10 @@ class ProductionViewModel @Inject constructor(
                         unit = it.unit,
                     )
                 }
-                applyBatchSizeScale()
+                baseRecipeIngredients = ingredients
+                _recipe.value = ingredients
             }
         }
-    }
-
-    fun onBatchSizeSelected(config: BatchSizeConfig) {
-        _selectedBatchSize.value = config
-        applyBatchSizeScale()
-    }
-
-    /** Scales base recipe quantities proportionally using the selected batch size config's raw material kg. */
-    private fun applyBatchSizeScale() {
-        val config = _selectedBatchSize.value
-        val baseBatchKg = basePlannedYieldKg?.takeIf { it > 0.0 }
-
-        if (baseBatchKg == null || config == null) {
-            _recipe.value = baseRecipeIngredients
-            _plannedYield.value = config?.expectedYieldKg
-            return
-        }
-
-        val scale = config.rawMaterialKg / baseBatchKg
-        _recipe.value = baseRecipeIngredients.map { ing ->
-            val baseQty = ing.plannedQty.toDoubleOrNull() ?: 0.0
-            val scaledQty = "%.3f".format(baseQty * scale)
-            ing.copy(plannedQty = scaledQty, actualQty = scaledQty)
-        }
-        _plannedYield.value = config.expectedYieldKg
     }
 
     fun onActualQtyChanged(index: Int, value: String) {
@@ -260,7 +195,9 @@ class ProductionViewModel @Inject constructor(
             return
         }
 
-        val invalidIngredient = _recipe.value.find { it.actualQty.toDoubleOrNull() == null || it.actualQty.toDouble() < 0 }
+        val invalidIngredient = _recipe.value.find {
+            it.actualQty.toDoubleOrNull() == null || it.actualQty.toDouble() < 0
+        }
         if (invalidIngredient != null) {
             _submitState.value = SubmitState.Error("Invalid quantity for ${invalidIngredient.name}")
             return
@@ -268,10 +205,18 @@ class ProductionViewModel @Inject constructor(
 
         _submitState.value = SubmitState.Loading
         viewModelScope.launch {
-
             val recipeKey = selectedRecipeId ?: flavor.id
             val actualYieldKg = _actualOutput.value.toDoubleOrNull()
-            val batchConfig = _selectedBatchSize.value
+
+            // Compute totals from recipe ingredient quantities
+            val totalInputKg = _recipe.value.sumOf { it.actualQty.toDoubleOrNull() ?: 0.0 }
+            val expectedBoxes = (totalInputKg / 0.021).toInt()
+            val expectedUnits = expectedBoxes * 15
+
+            // Auto-generate batch_number: count existing batches for this code + flavor
+            val existingCount = repository.countBatchesForCodeAndFlavor(batchCode, flavor.id)
+                .getOrDefault(0)
+            val batchNumber = existingCount + 1
 
             val result = repository.submitBatch(
                 batchCode = batchCode,
@@ -280,19 +225,17 @@ class ProductionViewModel @Inject constructor(
                 recipeId = recipeKey,
                 productionDate = _manufacturingDate.value,
                 workerId = WorkerIdentityStore.workerId,
-                plannedYield = _plannedYield.value,
+                plannedYield = totalInputKg,
                 actualYield = actualYieldKg,
                 isOnline = isOnline,
-                batchSizeUnits = batchConfig?.units,
-                rawMaterialInput = batchConfig?.rawMaterialKg,
-                expectedYield = batchConfig?.expectedYieldKg,
-                expectedBoxes = batchConfig?.boxes,
-                expectedUnits = batchConfig?.units,
+                expectedBoxes = expectedBoxes,
+                expectedUnits = expectedUnits,
+                batchNumber = batchNumber,
             )
 
             result.onSuccess {
                 _submitState.value = SubmitState.Success(
-                    if (isOnline) "Batch $batchCode (${flavor.name}) submitted successfully"
+                    if (isOnline) "Batch $batchCode #$batchNumber (${flavor.name}) submitted successfully"
                     else "Batch $batchCode saved offline — will sync when connected"
                 )
                 reset()
@@ -308,10 +251,7 @@ class ProductionViewModel @Inject constructor(
         _batchCode.value = BatchCodeGenerator.generate()
         _recipe.value = emptyList()
         baseRecipeIngredients = emptyList()
-        basePlannedYieldKg = null
         selectedRecipeId = null
-        _selectedBatchSize.value = null
-        _plannedYield.value = null
         _actualOutput.value = ""
         _manufacturingDate.value = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         _submitState.value = SubmitState.Idle

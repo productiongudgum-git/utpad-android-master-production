@@ -117,6 +117,17 @@ class ProductionRepository @Inject constructor(
         }
     }
 
+    suspend fun countBatchesForCodeAndFlavor(batchCode: String, flavorId: String): Result<Int> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val response = api.getProductionBatchesByCodeAndFlavor(
+                    batchCode = "eq.$batchCode",
+                    flavorId = "eq.$flavorId",
+                )
+                if (response.isSuccessful) response.body()?.size ?: 0 else 0
+            }
+        }
+
     suspend fun submitBatch(
         batchCode: String,
         skuId: String,
@@ -132,6 +143,7 @@ class ProductionRepository @Inject constructor(
         expectedYield: Double? = null,
         expectedBoxes: Int? = null,
         expectedUnits: Int? = null,
+        batchNumber: Int? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         if (isOnline) {
             runCatching {
@@ -149,6 +161,7 @@ class ProductionRepository @Inject constructor(
                     expectedYield = expectedYield,
                     expectedBoxes = expectedBoxes,
                     expectedUnits = expectedUnits,
+                    batchNumber = batchNumber,
                 )
 
                 Log.d(TAG, "Saving production batch batch_code=$batchCode flavor_id=$skuId recipe_id=$recipeId")
@@ -175,6 +188,7 @@ class ProductionRepository @Inject constructor(
                     put("expected_yield", expectedYield ?: JSONObject.NULL)
                     put("expected_boxes", expectedBoxes ?: JSONObject.NULL)
                     put("expected_units", expectedUnits ?: JSONObject.NULL)
+                    put("batch_number", batchNumber ?: JSONObject.NULL)
                 }
                 pendingDao.insertEvent(
                     PendingOperationEventEntity(

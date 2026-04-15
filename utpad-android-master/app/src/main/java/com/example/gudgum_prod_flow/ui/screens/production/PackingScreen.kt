@@ -17,7 +17,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -31,6 +30,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -83,11 +83,11 @@ fun PackingScreen(
     val batchCodesLoading by viewModel.batchCodesLoading.collectAsState()
     val flavors by viewModel.flavors.collectAsState()
     val selectedFlavor by viewModel.selectedFlavor.collectAsState()
-    val qtyPacked by viewModel.qtyPacked.collectAsState()
+    val productionBatches by viewModel.productionBatches.collectAsState()
+    val selectedProductionBatch by viewModel.selectedProductionBatch.collectAsState()
+    val productionBatchesLoading by viewModel.productionBatchesLoading.collectAsState()
     val boxesMade by viewModel.boxesMade.collectAsState()
     val packingDate by viewModel.packingDate.collectAsState()
-
-    val shiftSummary by viewModel.shiftSummary.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
     val currentStep by viewModel.currentWizardStep.collectAsState()
 
@@ -152,11 +152,12 @@ fun PackingScreen(
 
                 WizardProgressBar(
                     currentStep = currentStep,
-                    totalSteps = 3,
+                    totalSteps = 4,
                     stepTitle = when (currentStep) {
                         1 -> "Batch Code"
-                        2 -> "Output & Date"
-                        else -> "Review & Summary"
+                        2 -> "Select Flavour"
+                        3 -> "Batch Number"
+                        else -> "Boxes & Date"
                     }
                 )
 
@@ -188,7 +189,11 @@ fun PackingScreen(
                                             strokeWidth = 2.dp,
                                             color = UtpadPrimary
                                         )
-                                        Text("Loading batch codes...", color = UtpadTextSecondary, style = MaterialTheme.typography.bodySmall)
+                                        Text(
+                                            "Loading batch codes...",
+                                            color = UtpadTextSecondary,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
                                     }
                                 } else {
                                     Row(
@@ -204,8 +209,7 @@ fun PackingScreen(
                                             itemLabel = { it },
                                             placeholder = "Search or select batch code...",
                                             label = "Batch Code",
-                                            modifier = Modifier
-                                                .weight(1f),
+                                            modifier = Modifier.weight(1f),
                                         )
                                         BarcodeScannerButton(
                                             prompt = "Scan packing batch code",
@@ -222,7 +226,7 @@ fun PackingScreen(
                                         )
                                     }
                                     Text(
-                                        text = "Search from current open batches or scan a barcode to fill the batch code instantly.",
+                                        text = "Search from current open batches or scan a barcode.",
                                         color = UtpadTextSecondary,
                                         style = MaterialTheme.typography.bodySmall,
                                     )
@@ -231,7 +235,7 @@ fun PackingScreen(
                         }
                     }
 
-                    // ── Step 2: Flavour, KGs, Boxes, Packing Date ──
+                    // ── Step 2: Select Flavour ──
                     2 -> {
                         Card(
                             shape = RoundedCornerShape(24.dp),
@@ -242,78 +246,130 @@ fun PackingScreen(
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(14.dp),
                             ) {
-                                // Flavour dropdown
+                                Text(
+                                    text = "FLAVOUR",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = UtpadTextSecondary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                SearchableDropdown(
+                                    items = flavors,
+                                    selectedItem = selectedFlavor,
+                                    onItemSelected = { viewModel.onFlavorSelected(it) },
+                                    itemLabel = { it.name },
+                                    placeholder = "Select flavour...",
+                                )
+                            }
+                        }
+                    }
+
+                    // ── Step 3: Select Batch Number ──
+                    3 -> {
+                        Card(
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = UtpadSurface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                Text(
+                                    text = "BATCH NUMBER",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = UtpadTextSecondary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                if (productionBatchesLoading) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.height(20.dp).width(20.dp),
+                                            strokeWidth = 2.dp,
+                                            color = UtpadPrimary
+                                        )
+                                        Text(
+                                            "Loading batches...",
+                                            color = UtpadTextSecondary,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                } else if (productionBatches.isEmpty()) {
+                                    Text(
+                                        text = "No production batches found for this batch code and flavour.",
+                                        color = UtpadTextSecondary,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                } else {
+                                    SearchableDropdown(
+                                        items = productionBatches,
+                                        selectedItem = selectedProductionBatch,
+                                        onItemSelected = { viewModel.onProductionBatchSelected(it) },
+                                        itemLabel = { "Batch ${it.batchNumber ?: "?"}" },
+                                        placeholder = "Select batch number...",
+                                    )
+
+                                    // Show expected boxes for selected batch
+                                    selectedProductionBatch?.expectedBoxes?.let { expected ->
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = UtpadPrimary.copy(alpha = 0.08f),
+                                        ) {
+                                            Text(
+                                                text = "Expected: $expected boxes",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = UtpadPrimary,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Step 4: Boxes Packed + Packing Date ──
+                    4 -> {
+                        Card(
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = UtpadSurface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                // Boxes packed
                                 Column {
                                     Text(
-                                        text = "FLAVOUR",
+                                        text = "BOXES PACKED",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = UtpadTextSecondary,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    SearchableDropdown(
-                                        items = flavors,
-                                        selectedItem = selectedFlavor,
-                                        onItemSelected = { viewModel.onFlavorSelected(it) },
-                                        itemLabel = { it.name },
-                                        placeholder = "Select flavour...",
+                                    OutlinedTextField(
+                                        value = boxesMade,
+                                        onValueChange = viewModel::onBoxesMadeChanged,
+                                        placeholder = { Text("0", color = UtpadTextSecondary) },
+                                        suffix = { Text("boxes", color = UtpadTextSecondary) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = UtpadPrimary,
+                                            unfocusedBorderColor = UtpadOutline,
+                                            focusedContainerColor = UtpadBackground,
+                                            unfocusedContainerColor = UtpadSurface,
+                                        ),
+                                        shape = RoundedCornerShape(16.dp),
                                     )
-                                }
-
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "KGS PACKED",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = UtpadTextSecondary,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        OutlinedTextField(
-                                            value = qtyPacked,
-                                            onValueChange = viewModel::onQtyPackedChanged,
-                                            placeholder = { Text("0", color = UtpadTextSecondary) },
-                                            suffix = { Text("kg", color = UtpadTextSecondary) },
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = UtpadPrimary,
-                                                unfocusedBorderColor = UtpadOutline,
-                                                focusedContainerColor = UtpadBackground,
-                                                unfocusedContainerColor = UtpadSurface,
-                                            ),
-                                            shape = RoundedCornerShape(16.dp),
-                                        )
-                                    }
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "BOXES COUNT",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = UtpadTextSecondary,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        OutlinedTextField(
-                                            value = boxesMade,
-                                            onValueChange = viewModel::onBoxesMadeChanged,
-                                            placeholder = { Text("0", color = UtpadTextSecondary) },
-                                            suffix = { Text("boxes", color = UtpadTextSecondary) },
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = UtpadPrimary,
-                                                unfocusedBorderColor = UtpadOutline,
-                                                focusedContainerColor = UtpadBackground,
-                                                unfocusedContainerColor = UtpadSurface,
-                                            ),
-                                            shape = RoundedCornerShape(16.dp),
-                                        )
-                                    }
                                 }
 
                                 // Auto-computed units display
@@ -323,7 +379,7 @@ fun PackingScreen(
                                         color = UtpadPrimary.copy(alpha = 0.1f),
                                     ) {
                                         Text(
-                                            text = "= $unitsPacked units (${boxesMade} boxes × 15 gums/box)",
+                                            text = "= $unitsPacked units ($boxesMade boxes × 15 gums/box)",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = UtpadPrimary,
                                             fontWeight = FontWeight.SemiBold,
@@ -332,6 +388,7 @@ fun PackingScreen(
                                     }
                                 }
 
+                                // Packing date
                                 Column {
                                     Text(
                                         text = "PACKING DATE",
@@ -350,7 +407,7 @@ fun PackingScreen(
                                             singleLine = true,
                                             readOnly = true,
                                             modifier = Modifier.fillMaxWidth(),
-                                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                            colors = OutlinedTextFieldDefaults.colors(
                                                 focusedBorderColor = UtpadPrimary,
                                                 unfocusedBorderColor = UtpadOutline,
                                                 focusedContainerColor = UtpadBackground,
@@ -392,37 +449,6 @@ fun PackingScreen(
                             }
                         }
                     }
-
-                    // ── Step 3: Summary Review ──
-                    3 -> {
-
-                        Card(
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(containerColor = UtpadPrimary.copy(alpha = 0.1f)),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Icon(Icons.Filled.Info, contentDescription = null, tint = UtpadPrimary)
-                                Column {
-                                    Text(
-                                        text = "Session Summary",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = UtpadPrimary,
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Batch: $batchCode\nFlavour: ${selectedFlavor?.name ?: "—"}\n${qtyPacked}kg in ${boxesMade} boxes (${unitsPacked ?: 0} units) on $packingDate",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = UtpadTextPrimary,
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
             }
 
@@ -455,7 +481,7 @@ fun PackingScreen(
 
                         Button(
                             onClick = {
-                                if (currentStep < 3) viewModel.nextStep() else viewModel.submit()
+                                if (currentStep < 4) viewModel.nextStep() else viewModel.submit()
                             },
                             modifier = Modifier.weight(1f).height(56.dp),
                             shape = RoundedCornerShape(20.dp),
@@ -466,7 +492,7 @@ fun PackingScreen(
                             enabled = submitState !is SubmitState.Loading,
                         ) {
                             Text(
-                                if (currentStep < 3) "Continue" else "Confirm & Submit",
+                                if (currentStep < 4) "Continue" else "Confirm & Submit",
                                 fontWeight = FontWeight.Bold
                             )
                         }

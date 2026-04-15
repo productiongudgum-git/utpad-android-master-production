@@ -58,7 +58,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.gudgum_prod_flow.ui.components.SearchableDropdown
 import com.example.gudgum_prod_flow.ui.navigation.AppRoute
-import com.example.gudgum_prod_flow.ui.viewmodels.BATCH_SIZE_OPTIONS
 import com.example.gudgum_prod_flow.ui.viewmodels.ProductionViewModel
 import com.example.gudgum_prod_flow.ui.viewmodels.SubmitState
 import com.example.gudgum_prod_flow.ui.theme.UtpadPrimary
@@ -84,9 +83,9 @@ fun ProductionScreen(
 ) {
     val selectedFlavor by viewModel.selectedFlavor.collectAsState()
     val batchCode by viewModel.batchCode.collectAsState()
-    val selectedBatchSize by viewModel.selectedBatchSize.collectAsState()
     val recipe by viewModel.recipe.collectAsState()
-    val expectedYield by viewModel.expectedYield.collectAsState()
+    val totalInputWeight by viewModel.totalInputWeight.collectAsState()
+    val expectedBoxesFromInput by viewModel.expectedBoxesFromInput.collectAsState()
     val manufacturingDate by viewModel.manufacturingDate.collectAsState()
     val actualOutput by viewModel.actualOutput.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
@@ -159,361 +158,326 @@ fun ProductionScreen(
                 WizardProgressBar(
                     currentStep = currentStep,
                     totalSteps = 3,
-                    stepTitle = when(currentStep) {
-                        1 -> "Flavor & Batch"
-                        2 -> "Recipe & Yield"
+                    stepTitle = when (currentStep) {
+                        1 -> "Select Flavor"
+                        2 -> "Recipe Ingredients"
                         else -> "Output & Date"
                     }
                 )
 
                 when (currentStep) {
+                    // ── Step 1: Select Flavor ──
                     1 -> {
-                        // Flavor Profile + Batch Code card
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = UtpadSurface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        // Flavor Profile dropdown
-                        Column {
-                            Text(
-                                text = "FLAVOR PROFILE",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = UtpadTextSecondary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            val flavorsList by viewModel.flavors.collectAsState()
-                            SearchableDropdown(
-                                items = flavorsList,
-                                selectedItem = selectedFlavor,
-                                onItemSelected = { viewModel.onFlavorSelected(it) },
-                                itemLabel = { it.name },
-                                placeholder = "Select Flavor...",
-                            )
-                        }
-
-                        // Batch Size selection cards
-                        Column {
-                            Text(
-                                text = "BATCH SIZE",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = UtpadTextSecondary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        Card(
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = UtpadSurface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
-                                BATCH_SIZE_OPTIONS.forEach { config ->
-                                    val isSelected = selectedBatchSize == config
-                                    Surface(
-                                        onClick = { viewModel.onBatchSizeSelected(config) },
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(16.dp),
-                                        color = if (isSelected) UtpadPrimary.copy(alpha = 0.1f) else UtpadBackground,
-                                        border = BorderStroke(
-                                            width = if (isSelected) 2.dp else 1.dp,
-                                            color = if (isSelected) UtpadPrimary else UtpadOutline,
-                                        ),
+                                // Flavor Profile dropdown
+                                Column {
+                                    Text(
+                                        text = "FLAVOR PROFILE",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = UtpadTextSecondary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    val flavorsList by viewModel.flavors.collectAsState()
+                                    SearchableDropdown(
+                                        items = flavorsList,
+                                        selectedItem = selectedFlavor,
+                                        onItemSelected = { viewModel.onFlavorSelected(it) },
+                                        itemLabel = { it.name },
+                                        placeholder = "Select Flavor...",
+                                    )
+                                }
+
+                                // Batch Code (read-only, auto-generated)
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Column(
-                                            modifier = Modifier.padding(12.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                        Text(
+                                            text = "BATCH CODE",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = UtpadTextSecondary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = UtpadBackground,
                                         ) {
                                             Text(
-                                                text = config.label,
-                                                style = MaterialTheme.typography.titleSmall,
+                                                text = "Autogenerated",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = UtpadPrimary,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isSelected) UtpadPrimary else UtpadTextPrimary,
-                                            )
-                                            Text(
-                                                text = "${config.boxes} boxes",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = UtpadTextSecondary,
-                                            )
-                                            Text(
-                                                text = "${config.rawMaterialKg.toInt()} kg input",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = UtpadTextSecondary,
-                                            )
-                                            Text(
-                                                text = "${config.expectedYieldKg} kg yield",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = if (isSelected) UtpadPrimary else UtpadTextSecondary,
-                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                             )
                                         }
                                     }
-                                }
-                            }
-                        }
-
-                        // Batch Code (read-only)
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = "BATCH CODE",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = UtpadTextSecondary,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = UtpadBackground,
-                                ) {
-                                    Text(
-                                        text = "Autogenerated",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = UtpadPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = batchCode,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        placeholder = { Text("Generated from today's date", color = UtpadTextSecondary) },
+                                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.SemiBold,
+                                        ),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            disabledTextColor = UtpadTextPrimary,
+                                            unfocusedBorderColor = UtpadOutline,
+                                            unfocusedContainerColor = UtpadSurface,
+                                        ),
+                                        shape = RoundedCornerShape(16.dp),
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = batchCode,
-                                onValueChange = {},
-                                readOnly = true,
-                                placeholder = { Text("Generated from today's date", color = UtpadTextSecondary) },
-                                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.SemiBold,
-                                ),
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    disabledTextColor = UtpadTextPrimary,
-                                    unfocusedBorderColor = UtpadOutline,
-                                    unfocusedContainerColor = UtpadSurface,
-                                ),
-                                shape = RoundedCornerShape(16.dp),
-                            )
                         }
-                    }
-                }
-                } // End of step 1
-                2 -> {
-                // Recipe Ingredients section
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = UtpadSurface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                ) {
-                    Column {
-                        // Header row
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(
-                                text = "INGREDIENT",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = UtpadTextSecondary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "QTY (KG)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = UtpadTextSecondary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        HorizontalDivider(color = UtpadOutline)
+                    } // End step 1
 
-                        // Ingredient rows
-                        recipe.forEachIndexed { index, ingredient ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = ingredient.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = UtpadTextPrimary,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                OutlinedTextField(
-                                    value = ingredient.quantity,
-                                    onValueChange = { viewModel.onRecipeQuantityChanged(index, it) },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    singleLine = true,
-                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                        textAlign = TextAlign.End,
-                                        fontWeight = FontWeight.Bold,
-                                    ),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = UtpadPrimary,
-                                        unfocusedBorderColor = UtpadOutline,
-                                        focusedContainerColor = UtpadBackground,
-                                        unfocusedContainerColor = UtpadSurface,
-                                    ),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.weight(0.5f),
-                                )
-                            }
-                            if (index < recipe.lastIndex) {
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = UtpadOutline)
-                            }
-                        }
-
-                        // Expected Yield footer
-                        HorizontalDivider(color = UtpadOutline)
-                        Surface(
-                            color = UtpadBackground,
+                    // ── Step 2: Recipe Ingredients (editable quantities) ──
+                    2 -> {
+                        Card(
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = UtpadSurface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(
-                                    text = "Expected Yield",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = UtpadPrimary,
-                                )
-                                Text(
-                                    text = expectedYield,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = UtpadPrimary,
-                                )
-                            }
-                        }
-                    }
-                }
-                } // End of step 2
-                3 -> {
-                // Manufacturing Date + Actual Output card
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = UtpadSurface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        // Manufacturing Date
-                        Column {
-                            Text(
-                                text = "MANUFACTURING DATE",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = UtpadTextSecondary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            var showDatePicker by remember { mutableStateOf(false) }
-                            if (showDatePicker) {
-                                val datePickerState = rememberDatePickerState()
-                                DatePickerDialog(
-                                    onDismissRequest = { showDatePicker = false },
-                                    confirmButton = {
-                                        TextButton(onClick = {
-                                            datePickerState.selectedDateMillis?.let { millis ->
-                                                val format = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-                                                viewModel.onManufacturingDateChanged(format.format(java.util.Date(millis)))
-                                            }
-                                            showDatePicker = false
-                                        }) {
-                                            Text("OK", color = UtpadPrimary)
+                            Column {
+                                // Header row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text = "INGREDIENT",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = UtpadTextSecondary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "QTY (KG)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = UtpadTextSecondary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                HorizontalDivider(color = UtpadOutline)
+
+                                // Ingredient rows
+                                recipe.forEachIndexed { index, ingredient ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = ingredient.name,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = UtpadTextPrimary,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        OutlinedTextField(
+                                            value = ingredient.quantity,
+                                            onValueChange = { viewModel.onRecipeQuantityChanged(index, it) },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                            singleLine = true,
+                                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                                textAlign = TextAlign.End,
+                                                fontWeight = FontWeight.Bold,
+                                            ),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedBorderColor = UtpadPrimary,
+                                                unfocusedBorderColor = UtpadOutline,
+                                                focusedContainerColor = UtpadBackground,
+                                                unfocusedContainerColor = UtpadSurface,
+                                            ),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.weight(0.5f),
+                                        )
+                                    }
+                                    if (index < recipe.lastIndex) {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(horizontal = 16.dp),
+                                            color = UtpadOutline
+                                        )
+                                    }
+                                }
+
+                                // Totals footer
+                                HorizontalDivider(color = UtpadOutline)
+                                Surface(color = UtpadBackground) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Text(
+                                                text = "Total Input Weight (kg)",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                color = UtpadPrimary,
+                                            )
+                                            Text(
+                                                text = "%.3f kg".format(totalInputWeight),
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                color = UtpadPrimary,
+                                            )
                                         }
-                                    },
-                                    dismissButton = {
-                                        TextButton(onClick = { showDatePicker = false }) {
-                                            Text("Cancel", color = UtpadTextSecondary)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Text(
+                                                text = "Expected Boxes",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = UtpadTextSecondary,
+                                            )
+                                            Text(
+                                                text = "$expectedBoxesFromInput boxes",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = UtpadTextSecondary,
+                                            )
                                         }
                                     }
-                                ) {
-                                    DatePicker(state = datePickerState)
                                 }
                             }
-                            
-                            Box(modifier = Modifier.fillMaxWidth()) {
-                                OutlinedTextField(
-                                    value = manufacturingDate,
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    placeholder = { Text("Select Date", color = UtpadTextSecondary) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = UtpadPrimary,
-                                        unfocusedBorderColor = UtpadOutline,
-                                        focusedContainerColor = UtpadBackground,
-                                        unfocusedContainerColor = UtpadSurface,
-                                    ),
-                                    shape = RoundedCornerShape(16.dp),
-                                )
-                                // Invisible surface to capture clicks
-                                Surface(
-                                    modifier = Modifier.matchParentSize(),
-                                    color = androidx.compose.ui.graphics.Color.Transparent,
-                                    onClick = { showDatePicker = true }
-                                ) {}
+                        }
+                    } // End step 2
+
+                    // ── Step 3: Manufacturing Date + Actual Yield ──
+                    3 -> {
+                        Card(
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = UtpadSurface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                // Manufacturing Date
+                                Column {
+                                    Text(
+                                        text = "MANUFACTURING DATE",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = UtpadTextSecondary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    var showDatePicker by remember { mutableStateOf(false) }
+                                    if (showDatePicker) {
+                                        val datePickerState = rememberDatePickerState()
+                                        DatePickerDialog(
+                                            onDismissRequest = { showDatePicker = false },
+                                            confirmButton = {
+                                                TextButton(onClick = {
+                                                    datePickerState.selectedDateMillis?.let { millis ->
+                                                        val format = java.text.SimpleDateFormat(
+                                                            "yyyy-MM-dd",
+                                                            java.util.Locale.getDefault()
+                                                        )
+                                                        viewModel.onManufacturingDateChanged(
+                                                            format.format(java.util.Date(millis))
+                                                        )
+                                                    }
+                                                    showDatePicker = false
+                                                }) {
+                                                    Text("OK", color = UtpadPrimary)
+                                                }
+                                            },
+                                            dismissButton = {
+                                                TextButton(onClick = { showDatePicker = false }) {
+                                                    Text("Cancel", color = UtpadTextSecondary)
+                                                }
+                                            }
+                                        ) {
+                                            DatePicker(state = datePickerState)
+                                        }
+                                    }
+
+                                    Box(modifier = Modifier.fillMaxWidth()) {
+                                        OutlinedTextField(
+                                            value = manufacturingDate,
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            placeholder = { Text("Select Date", color = UtpadTextSecondary) },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedBorderColor = UtpadPrimary,
+                                                unfocusedBorderColor = UtpadOutline,
+                                                focusedContainerColor = UtpadBackground,
+                                                unfocusedContainerColor = UtpadSurface,
+                                            ),
+                                            shape = RoundedCornerShape(16.dp),
+                                        )
+                                        Surface(
+                                            modifier = Modifier.matchParentSize(),
+                                            color = androidx.compose.ui.graphics.Color.Transparent,
+                                            onClick = { showDatePicker = true }
+                                        ) {}
+                                    }
+                                }
+
+                                // Actual Production Output
+                                Column {
+                                    Text(
+                                        text = "ACTUAL YIELD (KG)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = UtpadTextSecondary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = actualOutput,
+                                        onValueChange = { viewModel.onActualOutputChanged(it) },
+                                        placeholder = { Text("0.00", color = UtpadTextSecondary) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        suffix = { Text("kg", color = UtpadTextSecondary) },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = UtpadPrimary,
+                                            unfocusedBorderColor = UtpadOutline,
+                                            focusedContainerColor = UtpadBackground,
+                                            unfocusedContainerColor = UtpadSurface,
+                                        ),
+                                        shape = RoundedCornerShape(16.dp),
+                                    )
+                                }
                             }
                         }
-
-                        // Actual Production Output
-                        Column {
-                            Text(
-                                text = "ACTUAL OUTPUT (KG)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = UtpadTextSecondary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = actualOutput,
-                                onValueChange = { viewModel.onActualOutputChanged(it) },
-                                placeholder = { Text("0.00", color = UtpadTextSecondary) },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                suffix = { Text("Kg", color = UtpadTextSecondary) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = UtpadPrimary,
-                                    unfocusedBorderColor = UtpadOutline,
-                                    focusedContainerColor = UtpadBackground,
-                                    unfocusedContainerColor = UtpadSurface,
-                                ),
-                                shape = RoundedCornerShape(16.dp),
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "System allows +/-5% tolerance from expected yield.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = UtpadTextSecondary,
-                            )
-                        }
-                    }
-                }
-                } // End of step 3
-                } // End of when
+                    } // End step 3
+                } // End when
 
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // Bottom action button
+            // Bottom action buttons
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -528,12 +492,8 @@ fun ProductionScreen(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         androidx.compose.material3.OutlinedButton(
-                            onClick = { 
-                                if (currentStep > 1) {
-                                    viewModel.previousStep()
-                                } else {
-                                    viewModel.reset()
-                                }
+                            onClick = {
+                                if (currentStep > 1) viewModel.previousStep() else viewModel.reset()
                             },
                             modifier = Modifier
                                 .weight(1f)
@@ -543,20 +503,15 @@ fun ProductionScreen(
                                 contentColor = UtpadTextPrimary
                             )
                         ) {
-                            if (currentStep > 1) {
-                                Text("Back", fontWeight = FontWeight.Bold)
-                            } else {
-                                Text("Reset", fontWeight = FontWeight.Bold)
-                            }
+                            Text(
+                                if (currentStep > 1) "Back" else "Reset",
+                                fontWeight = FontWeight.Bold
+                            )
                         }
-                        
+
                         Button(
                             onClick = {
-                                if (currentStep < 3) {
-                                    viewModel.nextStep()
-                                } else {
-                                    viewModel.submit()
-                                }
+                                if (currentStep < 3) viewModel.nextStep() else viewModel.submit()
                             },
                             modifier = Modifier
                                 .weight(1f)
@@ -568,11 +523,10 @@ fun ProductionScreen(
                             ),
                             enabled = submitState !is SubmitState.Loading,
                         ) {
-                            if (currentStep < 3) {
-                                Text("Continue", fontWeight = FontWeight.Bold)
-                            } else {
-                                Text("Confirm & Save", fontWeight = FontWeight.Bold)
-                            }
+                            Text(
+                                if (currentStep < 3) "Continue" else "Confirm & Save",
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                     if (AppRoute.Packing in allowedRoutes) {
@@ -609,7 +563,7 @@ private fun WizardProgressBar(
 ) {
     val progress = currentStep.toFloat() / totalSteps.toFloat()
     val percentage = (progress * 100).toInt()
-    
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -641,8 +595,7 @@ private fun WizardProgressBar(
                 fontWeight = FontWeight.SemiBold
             )
         }
-        
-        // Progress Bar Line
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
