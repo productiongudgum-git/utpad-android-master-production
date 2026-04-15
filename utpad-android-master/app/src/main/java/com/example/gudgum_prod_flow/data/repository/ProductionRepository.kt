@@ -153,25 +153,11 @@ class ProductionRepository @Inject constructor(
 
                 Log.d(TAG, "Saving production batch batch_code=$batchCode flavor_id=$skuId recipe_id=$recipeId")
 
-                val existingBatch = findExistingBatch(batchCode = batchCode, flavorId = skuId)
-                if (existingBatch?.id != null) {
-                    updateBatch(existingBatch.id, request)
-                    return@runCatching
-                }
-
                 val batchResp = api.insertProductionBatch(request)
                 val batchError = batchResp.errorBody()?.string().orEmpty()
                 Log.d(TAG, "Production save status=${batchResp.code()} body=${if (batchError.isBlank()) "<empty>" else batchError}")
 
                 if (!batchResp.isSuccessful && batchResp.code() != 201) {
-                    if (isDuplicateKeyConflict(batchResp.code(), batchError)) {
-                        val duplicateBatch = findExistingBatch(batchCode = batchCode, flavorId = skuId)
-                        if (duplicateBatch?.id != null) {
-                            updateBatch(duplicateBatch.id, request)
-                            return@runCatching
-                        }
-                        error("This production batch is already saved for the selected flavor.")
-                    }
                     error("Unable to save the production batch right now. Please try again.")
                 }
             }
@@ -207,31 +193,6 @@ class ProductionRepository @Inject constructor(
         }
     }
 
-    private suspend fun findExistingBatch(batchCode: String, flavorId: String): ProductionBatchDto? {
-        val response = api.findProductionBatch(
-            batchCode = "eq.$batchCode",
-            flavorId = "eq.$flavorId",
-        )
-
-        if (!response.isSuccessful) {
-            Log.w(TAG, "Failed to lookup production batch: ${response.code()}")
-            return null
-        }
-
-        return response.body().orEmpty().firstOrNull()
-    }
-
-    private suspend fun updateBatch(batchId: String, request: SubmitProductionBatchRequest) {
-        val response = api.updateProductionBatch(
-            id = "eq.$batchId",
-            request = request,
-        )
-        val errorBody = response.errorBody()?.string().orEmpty()
-        if (!response.isSuccessful) {
-            Log.e(TAG, "Failed to update production batch $batchId: ${response.code()} $errorBody")
-            error("Unable to update the existing production batch right now. Please try again.")
-        }
-    }
 }
 
 private val WorkerIdentityStore get() = com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
