@@ -65,8 +65,11 @@ class PackingRepository @Inject constructor(
         }
 
     /**
-     * For "Packing Complete" step 2: all open batches that do NOT have a
-     * packing session with status='complete' yet.
+     * For PATH A ("Packing Complete") step 2.
+     * Returns ALL open batches that have no complete packing session yet —
+     * this intentionally includes BOTH truly-unpacked batches AND batches that
+     * already have partial/null sessions. Both are shown together in a single
+     * flat list so the worker can mark any of them as fully complete.
      */
     suspend fun getProductionBatchesForCompletePacking(): Result<List<ProductionBatchWithPackingDto>> =
         getAllBatchesWithPackingStatus().map { batches ->

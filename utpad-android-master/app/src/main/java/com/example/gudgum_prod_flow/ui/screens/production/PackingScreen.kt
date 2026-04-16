@@ -93,12 +93,18 @@ fun PackingScreen(
     val unpackedBatches by viewModel.unpackedBatches.collectAsState()
     val batchesLoading by viewModel.batchesLoading.collectAsState()
     val selectedBatch by viewModel.selectedBatch.collectAsState()
+    val isFromPartialList by viewModel.isFromPartialList.collectAsState()
+    val selectedFinalStatus by viewModel.selectedFinalStatus.collectAsState()
     val boxesMade by viewModel.boxesMade.collectAsState()
     val packingDate by viewModel.packingDate.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
     val currentStep by viewModel.currentWizardStep.collectAsState()
 
     val unitsPacked = boxesMade.toIntOrNull()?.let { it * 15 }
+
+    // True when the worker is on PATH B and selected a batch from the left (partial) column.
+    // In this case step 3 shows the "is packing now complete?" status question.
+    val showStatusQuestion = selectedPackingStatus == PackingStatus.Partial && isFromPartialList
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -161,37 +167,46 @@ fun PackingScreen(
                     totalSteps = 3,
                     stepTitle = when (currentStep) {
                         1 -> "Packing Status"
-                        2 -> if (selectedPackingStatus == PackingStatus.Complete) "Select Batch" else "Select Batch"
-                        else -> "Boxes & Date"
+                        2 -> "Select Batch"
+                        else -> if (showStatusQuestion) "Outcome & Boxes" else "Boxes & Date"
                     }
                 )
 
                 when (currentStep) {
-                    // ── Step 1: Packing status selection ──
+                    // ── Step 1: Packing status selection ──────────────────────
                     1 -> PackingStatusStep(
                         selectedStatus = selectedPackingStatus,
                         onStatusSelected = viewModel::onPackingStatusSelected,
                     )
 
-                    // ── Step 2: Batch selection ──
+                    // ── Step 2: Batch selection ───────────────────────────────
                     2 -> when (selectedPackingStatus) {
+                        // PATH A: single flat list — all batches without a complete session
                         PackingStatus.Complete -> CompleteBatchListStep(
                             batches = completeBatches,
                             selectedBatch = selectedBatch,
                             loading = batchesLoading,
-                            onBatchSelected = viewModel::onBatchSelected,
+                            onBatchSelected = { batch -> viewModel.onBatchSelected(batch) },
                         )
+                        // PATH B: two-column list (partial/null on left, unpacked on right)
                         PackingStatus.Partial -> PartialBatchListStep(
                             partialBatches = partialBatches,
                             unpackedBatches = unpackedBatches,
                             selectedBatch = selectedBatch,
                             loading = batchesLoading,
-                            onBatchSelected = viewModel::onBatchSelected,
+                            onBatchSelectedFromPartial = { batch ->
+                                viewModel.onBatchSelected(batch, fromPartialList = true)
+                            },
+                            onBatchSelectedFromUnpacked = { batch ->
+                                viewModel.onBatchSelected(batch, fromPartialList = false)
+                            },
                         )
                         null -> {}
                     }
 
-                    // ── Step 3: Boxes packed + packing date ──
+                    // ── Step 3: Boxes packed + packing date ───────────────────
+                    // When showStatusQuestion == true (PATH B, left column batch),
+                    // an inline "is packing now complete?" question is shown first.
                     3 -> PackingOutputStep(
                         selectedBatch = selectedBatch,
                         boxesMade = boxesMade,
@@ -199,11 +214,14 @@ fun PackingScreen(
                         packingDate = packingDate,
                         onBoxesMadeChanged = viewModel::onBoxesMadeChanged,
                         onPackingDateChanged = viewModel::onPackingDateChanged,
+                        showStatusQuestion = showStatusQuestion,
+                        selectedFinalStatus = selectedFinalStatus,
+                        onFinalStatusSelected = viewModel::onFinalStatusSelected,
                     )
                 }
             }
 
-            // Bottom action bar
+            // ── Bottom action bar ─────────────────────────────────────────────
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -245,7 +263,11 @@ fun PackingScreen(
                             enabled = submitState !is SubmitState.Loading && when (currentStep) {
                                 1 -> selectedPackingStatus != null
                                 2 -> selectedBatch != null
-                                else -> true
+                                else -> {
+                                    // Step 3: also require the status question to be answered
+                                    // when the batch came from the partial (left) column.
+                                    !showStatusQuestion || selectedFinalStatus != null
+                                }
                             },
                         ) {
                             if (submitState is SubmitState.Loading) {
@@ -357,7 +379,9 @@ private fun PackingStatusCard(
     }
 }
 
-// ── Step 2a: Complete — single batch list ─────────────────────────────────────
+// ── Step 2a (PATH A): single flat list ────────────────────────────────────────
+// Shows ALL batches that have no complete packing session yet
+// (includes both unpacked batches and batches with partial/null sessions).
 
 @Composable
 private fun CompleteBatchListStep(
@@ -401,7 +425,9 @@ private fun CompleteBatchListStep(
     }
 }
 
-// ── Step 2b: Partial — two-column batch lists ─────────────────────────────────
+// ── Step 2b (PATH B): two-column list ─────────────────────────────────────────
+// LEFT  (onBatchSelectedFromPartial)  → batch has partial/null sessions, no complete session
+// RIGHT (onBatchSelectedFromUnpacked) → batch has NO sessions at all
 
 @Composable
 private fun PartialBatchListStep(
@@ -409,7 +435,8 @@ private fun PartialBatchListStep(
     unpackedBatches: List<ProductionBatchWithPackingDto>,
     selectedBatch: ProductionBatchWithPackingDto?,
     loading: Boolean,
-    onBatchSelected: (ProductionBatchWithPackingDto) -> Unit,
+    onBatchSelectedFromPartial: (ProductionBatchWithPackingDto) -> Unit,
+    onBatchSelectedFromUnpacked: (ProductionBatchWithPackingDto) -> Unit,
 ) {
     if (loading) {
         LoadingRow()
@@ -422,7 +449,7 @@ private fun PartialBatchListStep(
             .height(IntrinsicSize.Min),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // Left: Partially packed
+        // Left: partially packed (has partial/null sessions, no complete session)
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -448,7 +475,7 @@ private fun PartialBatchListStep(
                             BatchListItem(
                                 batch = batch,
                                 selected = selectedBatch?.id == batch.id,
-                                onClick = { onBatchSelected(batch) },
+                                onClick = { onBatchSelectedFromPartial(batch) },
                                 compact = true,
                             )
                             if (index < partialBatches.lastIndex) {
@@ -460,7 +487,7 @@ private fun PartialBatchListStep(
             }
         }
 
-        // Divider
+        // Column divider
         Box(
             modifier = Modifier
                 .width(1.dp)
@@ -468,7 +495,7 @@ private fun PartialBatchListStep(
                 .background(UtpadOutline.copy(alpha = 0.4f))
         )
 
-        // Right: Not yet started
+        // Right: not yet started (no packing sessions at all)
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -494,7 +521,7 @@ private fun PartialBatchListStep(
                             BatchListItem(
                                 batch = batch,
                                 selected = selectedBatch?.id == batch.id,
-                                onClick = { onBatchSelected(batch) },
+                                onClick = { onBatchSelectedFromUnpacked(batch) },
                                 compact = true,
                             )
                             if (index < unpackedBatches.lastIndex) {
@@ -509,6 +536,8 @@ private fun PartialBatchListStep(
 }
 
 // ── Step 3: Boxes packed + packing date ──────────────────────────────────────
+// When showStatusQuestion == true, an inline "is packing now complete?" question
+// is shown at the top before the boxes/date inputs.
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -519,8 +548,12 @@ private fun PackingOutputStep(
     packingDate: String,
     onBoxesMadeChanged: (String) -> Unit,
     onPackingDateChanged: (String) -> Unit,
+    showStatusQuestion: Boolean,
+    selectedFinalStatus: PackingStatus?,
+    onFinalStatusSelected: (PackingStatus) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+
         // Selected batch summary
         selectedBatch?.let { batch ->
             Surface(
@@ -548,6 +581,32 @@ private fun PackingOutputStep(
             }
         }
 
+        // Status question — PATH B, left column only.
+        // Worker explicitly chooses whether this session completes the batch or not.
+        if (showStatusQuestion) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "IS PACKING NOW COMPLETE FOR THIS BATCH?",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = UtpadTextSecondary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                PackingStatusCard(
+                    title = "Packing Complete",
+                    description = "Batch is now fully packed",
+                    selected = selectedFinalStatus == PackingStatus.Complete,
+                    onClick = { onFinalStatusSelected(PackingStatus.Complete) },
+                )
+                PackingStatusCard(
+                    title = "Yet to Finish",
+                    description = "Still more packing to do on this batch",
+                    selected = selectedFinalStatus == PackingStatus.Partial,
+                    onClick = { onFinalStatusSelected(PackingStatus.Partial) },
+                )
+            }
+        }
+
+        // Boxes packed + packing date card
         Card(
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = UtpadSurface),

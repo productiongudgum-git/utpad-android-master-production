@@ -29,30 +29,47 @@ class PackingViewModel @Inject constructor(
         private const val TAG = "PackingViewModel"
     }
 
-    // Step 1: packing status selection
+    // ── Step 1 ────────────────────────────────────────────────────────────────
     private val _selectedPackingStatus = MutableStateFlow<PackingStatus?>(null)
     val selectedPackingStatus: StateFlow<PackingStatus?> = _selectedPackingStatus.asStateFlow()
 
-    // Step 2a: batches for "Complete" path (no complete packing session yet)
+    // ── Step 2a (PATH A — Complete): all batches with no complete session ──────
     private val _completeBatches = MutableStateFlow<List<ProductionBatchWithPackingDto>>(emptyList())
     val completeBatches: StateFlow<List<ProductionBatchWithPackingDto>> = _completeBatches.asStateFlow()
 
-    // Step 2b: batches with partial packing sessions (left column)
+    // ── Step 2b (PATH B — Partial): left column ────────────────────────────────
+    // Batches that have at least one partial/null session and NO complete session.
     private val _partialBatches = MutableStateFlow<List<ProductionBatchWithPackingDto>>(emptyList())
     val partialBatches: StateFlow<List<ProductionBatchWithPackingDto>> = _partialBatches.asStateFlow()
 
-    // Step 2b: batches with no packing sessions at all (right column)
+    // ── Step 2b (PATH B — Partial): right column ──────────────────────────────
+    // Batches with NO packing sessions at all.
     private val _unpackedBatches = MutableStateFlow<List<ProductionBatchWithPackingDto>>(emptyList())
     val unpackedBatches: StateFlow<List<ProductionBatchWithPackingDto>> = _unpackedBatches.asStateFlow()
 
     private val _batchesLoading = MutableStateFlow(false)
     val batchesLoading: StateFlow<Boolean> = _batchesLoading.asStateFlow()
 
-    // Selected batch from step 2
+    // ── Step 2 selection ──────────────────────────────────────────────────────
     private val _selectedBatch = MutableStateFlow<ProductionBatchWithPackingDto?>(null)
     val selectedBatch: StateFlow<ProductionBatchWithPackingDto?> = _selectedBatch.asStateFlow()
 
-    // Step 3: packing output
+    /**
+     * True when the selected batch came from the LEFT (partial/null) column in step 2b.
+     * False when it came from the RIGHT (unpacked) column, or when on PATH A.
+     *
+     * Drives whether step 3 shows the "is packing now complete?" status question.
+     */
+    private val _isFromPartialList = MutableStateFlow(false)
+    val isFromPartialList: StateFlow<Boolean> = _isFromPartialList.asStateFlow()
+
+    // ── Step 3 status question ────────────────────────────────────────────────
+    // Only relevant when isFromPartialList == true (PATH B, left column).
+    // The worker explicitly chooses "complete" or "partial" for this session.
+    private val _selectedFinalStatus = MutableStateFlow<PackingStatus?>(null)
+    val selectedFinalStatus: StateFlow<PackingStatus?> = _selectedFinalStatus.asStateFlow()
+
+    // ── Step 3 inputs ─────────────────────────────────────────────────────────
     private val _boxesMade = MutableStateFlow("")
     val boxesMade: StateFlow<String> = _boxesMade.asStateFlow()
 
@@ -86,8 +103,23 @@ class PackingViewModel @Inject constructor(
         _selectedPackingStatus.value = status
     }
 
-    fun onBatchSelected(batch: ProductionBatchWithPackingDto) {
+    /**
+     * Called when the worker selects a batch in step 2.
+     *
+     * @param fromPartialList  true  → batch came from the LEFT (partial/null) column in step 2b;
+     *                                 step 3 will show the "is packing now complete?" question.
+     *                         false → batch came from the RIGHT (unpacked) column, or PATH A;
+     *                                 step 3 goes straight to boxes + date (saves as partial).
+     */
+    fun onBatchSelected(batch: ProductionBatchWithPackingDto, fromPartialList: Boolean = false) {
         _selectedBatch.value = batch
+        _isFromPartialList.value = fromPartialList
+        _selectedFinalStatus.value = null
+    }
+
+    /** Called from the step 3 status question (only shown when isFromPartialList == true). */
+    fun onFinalStatusSelected(status: PackingStatus) {
+        _selectedFinalStatus.value = status
     }
 
     fun onBoxesMadeChanged(value: String) { _boxesMade.value = value }
@@ -96,10 +128,7 @@ class PackingViewModel @Inject constructor(
     fun nextStep() {
         val step = _currentWizardStep.value
         if (step < 3) {
-            if (step == 1) {
-                // Load batches appropriate to the selected packing status
-                loadBatchesForSelectedStatus()
-            }
+            if (step == 1) loadBatchesForSelectedStatus()
             _currentWizardStep.value = step + 1
         }
     }
@@ -124,15 +153,16 @@ class PackingViewModel @Inject constructor(
                     _unpackedBatches.value = unpacked
                 }
             }
+            // Clear selection state whenever the list is (re)loaded.
             _selectedBatch.value = null
+            _isFromPartialList.value = false
+            _selectedFinalStatus.value = null
             _batchesLoading.value = false
         }
     }
 
     private fun refreshBatchLists() {
-        if (_currentWizardStep.value == 2) {
-            loadBatchesForSelectedStatus()
-        }
+        if (_currentWizardStep.value == 2) loadBatchesForSelectedStatus()
     }
 
     fun submit() {
@@ -153,9 +183,30 @@ class PackingViewModel @Inject constructor(
             _submitState.value = SubmitState.Error("Enter a valid box count (> 0)")
             return
         }
+
+        // ── Determine which status string to save ─────────────────────────────
+        // PATH A (step 1 = Complete)        → always "complete"
+        // PATH B from RIGHT (unpacked col)  → always "partial" (no question asked)
+        // PATH B from LEFT (partial col)    → worker chose in step 3 status question
+        val statusStr: String = when {
+            packingStatus == PackingStatus.Complete -> "complete"
+            !_isFromPartialList.value -> "partial"
+            else -> {
+                val finalStatus = _selectedFinalStatus.value
+                if (finalStatus == null) {
+                    _submitState.value = SubmitState.Error("Select packing outcome for this session")
+                    return
+                }
+                if (finalStatus == PackingStatus.Complete) "complete" else "partial"
+            }
+        }
+
         val unitsPacked = boxes * 15
-        val statusStr = if (packingStatus == PackingStatus.Complete) "complete" else "partial"
-        Log.d(TAG, "submit: statusStr='$statusStr' batchCode=${batch.batchCode} productionBatchId=${batch.id} boxes=$boxes")
+        Log.d(
+            TAG,
+            "submit: statusStr='$statusStr' batchCode=${batch.batchCode} " +
+                "productionBatchId=${batch.id} boxes=$boxes isFromPartialList=${_isFromPartialList.value}"
+        )
 
         _submitState.value = SubmitState.Loading
         viewModelScope.launch {
@@ -173,7 +224,8 @@ class PackingViewModel @Inject constructor(
             result.onSuccess {
                 val batchLabel = batch.batchNumber?.let { "Batch $it" } ?: ""
                 val flavorLabel = batch.flavor?.name ?: ""
-                // Reset wizard state BEFORE setting Success so clear() doesn't overwrite the success message.
+                // Reset wizard state BEFORE setting Success so clear() doesn't overwrite the
+                // success message (both run on the same coroutine frame / main-thread dispatch).
                 clear()
                 _submitState.value = SubmitState.Success(
                     "Packed $boxes boxes for $batchLabel — $flavorLabel ($statusStr)"
@@ -188,14 +240,16 @@ class PackingViewModel @Inject constructor(
     fun clear() {
         _selectedPackingStatus.value = null
         _selectedBatch.value = null
+        _isFromPartialList.value = false
+        _selectedFinalStatus.value = null
         _completeBatches.value = emptyList()
         _partialBatches.value = emptyList()
         _unpackedBatches.value = emptyList()
         _boxesMade.value = ""
         _packingDate.value = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        // Do NOT reset _submitState here. The UI dismisses it via clearSubmitState() after
-        // showing the snackbar. Resetting here would wipe the Success state before the UI
-        // can display it (both run on the same coroutine frame).
+        // Do NOT reset _submitState here — the UI dismisses it via clearSubmitState() after
+        // showing the snackbar. Resetting here would wipe the Success/Error state before
+        // the UI LaunchedEffect can react (same coroutine frame on main thread).
         _currentWizardStep.value = 1
     }
 
