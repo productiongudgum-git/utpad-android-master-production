@@ -279,11 +279,11 @@ class ProductionViewModel @Inject constructor(
             )
 
             result.onSuccess {
+                reset()
                 _submitState.value = SubmitState.Success(
                     if (isOnline) "Batch $batchCode #$batchNumber (${flavor.name}) submitted successfully"
                     else "Batch $batchCode saved offline — will sync when connected"
                 )
-                reset()
             }
             result.onFailure { e ->
                 _submitState.value = SubmitState.Error(e.message ?: "Submission failed")
@@ -300,7 +300,7 @@ class ProductionViewModel @Inject constructor(
         selectedRecipeId = null
         _actualOutput.value = ""
         _manufacturingDate.value = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        _submitState.value = SubmitState.Idle
+        // Do NOT reset _submitState here — clearSubmitState() handles that after the overlay dismisses
         _currentWizardStep.value = 1
     }
 

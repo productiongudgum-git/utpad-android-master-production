@@ -305,11 +305,11 @@ class InwardingViewModel @Inject constructor(
                 isOnline = isOnline,
             )
             result.onSuccess {
+                resetInward()
                 _submitState.value = SubmitState.Success(
                     if (isOnline) "${ingredient.name}: $qty ${_selectedUnit.value} inwarded"
                     else "Inward saved offline — will sync when connected"
                 )
-                resetInward()
             }
             result.onFailure { e ->
                 _submitState.value = SubmitState.Error(e.message ?: "Submission failed")
@@ -342,8 +342,8 @@ class InwardingViewModel @Inject constructor(
                 isOnline = isOnline,
             )
             result.onSuccess {
-                _submitState.value = SubmitState.Success("Return of $qty boxes logged for batch ${_selectedReturnBatch.value}")
                 resetReturn()
+                _submitState.value = SubmitState.Success("Return of $qty boxes logged for batch ${_selectedReturnBatch.value}")
             }
             result.onFailure { e ->
                 _submitState.value = SubmitState.Error(e.message ?: "Return submission failed")
@@ -361,7 +361,7 @@ class InwardingViewModel @Inject constructor(
         _supplier.value = ""
         _billNumber.value = ""
         _billPhotoUri.value = null
-        _submitState.value = SubmitState.Idle
+        // Do NOT reset _submitState here — clearSubmitState() handles that after the overlay dismisses
         _currentWizardStep.value = 1
     }
 
@@ -370,7 +370,7 @@ class InwardingViewModel @Inject constructor(
         _selectedReturnSkuId.value = ""
         _returnQty.value = ""
         _returnReason.value = ""
-        _submitState.value = SubmitState.Idle
+        // Do NOT reset _submitState here — clearSubmitState() handles that after the overlay dismisses
     }
 
     fun reset() { resetInward(); resetReturn() }
