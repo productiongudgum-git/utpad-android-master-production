@@ -89,6 +89,7 @@ data class SubmitPackingSessionRequest(
     @SerialName("kgs_packed") val kgsPacked: Double? = null,
     @SerialName("units_packed") val unitsPacked: Int? = null,
     @SerialName("production_batch_id") val productionBatchId: String? = null,
+    val status: String = "partial",
 )
 
 @Serializable
@@ -102,7 +103,41 @@ data class PackingSessionDto(
     @SerialName("kgs_packed") val kgsPacked: Double? = null,
     @SerialName("units_packed") val unitsPacked: Int? = null,
     @SerialName("created_at") val createdAt: String? = null,
+    val status: String? = null,
 )
+
+/** Minimal packing session projection used for batch-status join queries */
+@Serializable
+data class PackingSessionStatusDto(
+    val id: String? = null,
+    val status: String? = null,
+    @SerialName("production_batch_id") val productionBatchId: String? = null,
+)
+
+/** Production batch with its packing sessions embedded (PostgREST left join) */
+@Serializable
+data class ProductionBatchWithPackingDto(
+    val id: String? = null,
+    @SerialName("batch_code") val batchCode: String,
+    @SerialName("sku_id") val skuId: String? = null,
+    @SerialName("flavor_id") val flavorId: String? = null,
+    @SerialName("production_date") val productionDate: String,
+    @SerialName("batch_number") val batchNumber: Int? = null,
+    @SerialName("expected_boxes") val expectedBoxes: Int? = null,
+    val flavor: FlavorJoinDto? = null,
+    @SerialName("packing_sessions") val packingSessions: List<PackingSessionStatusDto> = emptyList(),
+) {
+    val displayLabel: String
+        get() {
+            val flavorPart = flavor?.name?.uppercase() ?: ""
+            val batchPart = "Batch ${batchNumber ?: "?"}"
+            val boxesPart = "${expectedBoxes ?: "?"} expected boxes"
+            return "$batchCode - $batchPart - $flavorPart - $boxesPart"
+        }
+
+    val hasCompletePacking: Boolean
+        get() = packingSessions.any { it.status == "complete" }
+}
 
 // ── Dispatch Events (dispatch_events) ──────────────────────────────
 @Serializable

@@ -100,10 +100,11 @@ class ProductionRepository @Inject constructor(
                 val dtos = response.body() ?: emptyList()
                 batchDao.deleteAll()
                 batchDao.upsertAll(dtos.map {
+                    val resolvedSkuId = it.skuId ?: it.flavorId ?: it.batchCode
                     CachedBatchEntity(
                         batchCode = it.batchCode,
-                        skuId = it.skuId,
-                        skuName = it.flavor?.name ?: it.skuId,
+                        skuId = resolvedSkuId,
+                        skuName = it.flavor?.name ?: resolvedSkuId,
                         skuCode = it.flavor?.code ?: "",
                         productionDate = it.productionDate,
                         status = it.status,

@@ -115,6 +115,13 @@ interface SupabaseApiService {
         @Query("order") order: String = "production_date.asc",
     ): Response<List<ProductionBatchDto>>
 
+    @GET("rest/v1/production_batches")
+    suspend fun getProductionBatchesWithPackingStatus(
+        @Query("status") status: String = "eq.open",
+        @Query("select") select: String = "id,batch_code,sku_id,flavor_id,production_date,batch_number,expected_boxes,flavor:gg_flavors!production_batches_flavor_id_fkey(id,name,code),packing_sessions(id,status,production_batch_id)",
+        @Query("order") order: String = "production_date.desc",
+    ): Response<List<ProductionBatchWithPackingDto>>
+
     // ── Packing Sessions (packing_sessions) ────────────────────────
     @POST("rest/v1/packing_sessions")
     suspend fun insertPackingSession(

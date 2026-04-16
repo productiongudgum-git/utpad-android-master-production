@@ -1,10 +1,8 @@
 package com.example.gudgum_prod_flow.ui.viewmodels
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
-import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
+import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchWithPackingDto
 import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
 import com.example.gudgum_prod_flow.data.repository.PackingRepository
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
@@ -18,19 +16,7 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
-data class ShiftSummary(val shift: String, val totalPacked: String, val totalBoxes: String)
-
-/** Represents a batch+flavor pair for selection in packing */
-data class BatchFlavorOption(
-    val batchCode: String,
-    val flavorId: String?,
-    val flavorName: String?,
-    val flavorCode: String?,
-    val productionDate: String,
-) {
-    val displayLabel: String
-        get() = if (flavorName != null) "$batchCode — $flavorName" else batchCode
-}
+enum class PackingStatus { Complete, Partial }
 
 @HiltViewModel
 class PackingViewModel @Inject constructor(
@@ -42,40 +28,30 @@ class PackingViewModel @Inject constructor(
         private const val TAG = "PackingViewModel"
     }
 
-    // Batch+flavor options from open production batches
-    private val _batchFlavorOptions = MutableStateFlow<List<BatchFlavorOption>>(emptyList())
-    val batchFlavorOptions: StateFlow<List<BatchFlavorOption>> = _batchFlavorOptions.asStateFlow()
+    // Step 1: packing status selection
+    private val _selectedPackingStatus = MutableStateFlow<PackingStatus?>(null)
+    val selectedPackingStatus: StateFlow<PackingStatus?> = _selectedPackingStatus.asStateFlow()
 
-    private val _batchCodesLoading = MutableStateFlow(false)
-    val batchCodesLoading: StateFlow<Boolean> = _batchCodesLoading.asStateFlow()
+    // Step 2a: batches for "Complete" path (no complete packing session yet)
+    private val _completeBatches = MutableStateFlow<List<ProductionBatchWithPackingDto>>(emptyList())
+    val completeBatches: StateFlow<List<ProductionBatchWithPackingDto>> = _completeBatches.asStateFlow()
 
-    private val _batchCodes = MutableStateFlow<List<String>>(emptyList())
-    val batchCodes: StateFlow<List<String>> = _batchCodes.asStateFlow()
+    // Step 2b: batches with partial packing sessions (left column)
+    private val _partialBatches = MutableStateFlow<List<ProductionBatchWithPackingDto>>(emptyList())
+    val partialBatches: StateFlow<List<ProductionBatchWithPackingDto>> = _partialBatches.asStateFlow()
 
-    private val _batchCode = MutableStateFlow("")
-    val batchCode: StateFlow<String> = _batchCode.asStateFlow()
+    // Step 2b: batches with no packing sessions at all (right column)
+    private val _unpackedBatches = MutableStateFlow<List<ProductionBatchWithPackingDto>>(emptyList())
+    val unpackedBatches: StateFlow<List<ProductionBatchWithPackingDto>> = _unpackedBatches.asStateFlow()
 
-    private val _selectedBatchFlavor = MutableStateFlow<BatchFlavorOption?>(null)
-    val selectedBatchFlavor: StateFlow<BatchFlavorOption?> = _selectedBatchFlavor.asStateFlow()
+    private val _batchesLoading = MutableStateFlow(false)
+    val batchesLoading: StateFlow<Boolean> = _batchesLoading.asStateFlow()
 
-    // Flavour selection (step 2)
-    private val _flavors = MutableStateFlow<List<CachedFlavorEntity>>(emptyList())
-    val flavors: StateFlow<List<CachedFlavorEntity>> = _flavors.asStateFlow()
+    // Selected batch from step 2
+    private val _selectedBatch = MutableStateFlow<ProductionBatchWithPackingDto?>(null)
+    val selectedBatch: StateFlow<ProductionBatchWithPackingDto?> = _selectedBatch.asStateFlow()
 
-    private val _selectedFlavor = MutableStateFlow<CachedFlavorEntity?>(null)
-    val selectedFlavor: StateFlow<CachedFlavorEntity?> = _selectedFlavor.asStateFlow()
-
-    // Production batch selection (step 3)
-    private val _productionBatches = MutableStateFlow<List<ProductionBatchDto>>(emptyList())
-    val productionBatches: StateFlow<List<ProductionBatchDto>> = _productionBatches.asStateFlow()
-
-    private val _selectedProductionBatch = MutableStateFlow<ProductionBatchDto?>(null)
-    val selectedProductionBatch: StateFlow<ProductionBatchDto?> = _selectedProductionBatch.asStateFlow()
-
-    private val _productionBatchesLoading = MutableStateFlow(false)
-    val productionBatchesLoading: StateFlow<Boolean> = _productionBatchesLoading.asStateFlow()
-
-    // Packing output (step 4)
+    // Step 3: packing output
     private val _boxesMade = MutableStateFlow("")
     val boxesMade: StateFlow<String> = _boxesMade.asStateFlow()
 
@@ -83,9 +59,6 @@ class PackingViewModel @Inject constructor(
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
     )
     val packingDate: StateFlow<String> = _packingDate.asStateFlow()
-
-    private val _shiftSummary = MutableStateFlow(ShiftSummary("Morning", "0", "0"))
-    val shiftSummary: StateFlow<ShiftSummary> = _shiftSummary.asStateFlow()
 
     private val _submitState = MutableStateFlow<SubmitState>(SubmitState.Idle)
     val submitState: StateFlow<SubmitState> = _submitState.asStateFlow()
@@ -96,123 +69,82 @@ class PackingViewModel @Inject constructor(
     private var isOnline: Boolean = true
 
     init {
-        loadBatchCodes()
-        loadFlavors()
-
         realtimeManager.connect()
         viewModelScope.launch {
             realtimeManager.tableChanged.collect { table ->
-                when (table) {
-                    "production_batches", "packing_sessions" -> loadBatchCodes()
-                    "gg_flavors" -> loadFlavors()
+                if (table == "production_batches" || table == "packing_sessions") {
+                    refreshBatchLists()
                 }
-            }
-        }
-    }
-
-    private fun loadFlavors() {
-        viewModelScope.launch {
-            repository.getActiveFlavors().collect { entities ->
-                _flavors.value = entities
             }
         }
     }
 
     fun setOnlineStatus(online: Boolean) { isOnline = online }
 
-    fun loadBatchCodes() {
-        viewModelScope.launch {
-            _batchCodesLoading.value = true
-
-            val result = repository.getOpenBatches()
-            val batches = result.getOrDefault(emptyList())
-
-            val options = batches.map { batch ->
-                BatchFlavorOption(
-                    batchCode = batch.batchCode,
-                    flavorId = batch.flavorId,
-                    flavorName = batch.flavor?.name,
-                    flavorCode = batch.flavor?.code,
-                    productionDate = batch.productionDate,
-                )
-            }
-            _batchFlavorOptions.value = options
-            _batchCodes.value = options.map { it.batchCode }.distinct()
-
-            if (_selectedBatchFlavor.value == null && options.isNotEmpty()) {
-                onBatchFlavorSelected(options.first())
-            }
-
-            _batchCodesLoading.value = false
-        }
+    fun onPackingStatusSelected(status: PackingStatus) {
+        _selectedPackingStatus.value = status
     }
 
-    fun loadProductionBatches(batchCode: String, flavorId: String) {
-        viewModelScope.launch {
-            _productionBatchesLoading.value = true
-            Log.d(TAG, "loadProductionBatches: batchCode=$batchCode flavorId=$flavorId")
-            val result = repository.getProductionBatches(batchCode, flavorId)
-            val batches = result.getOrDefault(emptyList())
-            Log.d(TAG, "loadProductionBatches: got ${batches.size} batches, batch_numbers=${batches.map { it.batchNumber }}")
-            // Assign sequential numbers as fallback for rows where batch_number is null
-            val batchesWithNumbers = batches.mapIndexed { index, batch ->
-                if (batch.batchNumber == null) batch.copy(batchNumber = index + 1) else batch
-            }
-            _productionBatches.value = batchesWithNumbers
-            _selectedProductionBatch.value = null
-            _productionBatchesLoading.value = false
-        }
+    fun onBatchSelected(batch: ProductionBatchWithPackingDto) {
+        _selectedBatch.value = batch
     }
 
-    fun onBatchFlavorSelected(option: BatchFlavorOption) {
-        _selectedBatchFlavor.value = option
-        _batchCode.value = option.batchCode
-    }
-
-    fun onBatchCodeSelected(code: String) {
-        _batchCode.value = code
-        val option = _batchFlavorOptions.value.firstOrNull { it.batchCode == code }
-        _selectedBatchFlavor.value = option
-    }
-
-    fun onFlavorSelected(flavor: CachedFlavorEntity) { _selectedFlavor.value = flavor }
-    fun onProductionBatchSelected(batch: ProductionBatchDto) { _selectedProductionBatch.value = batch }
     fun onBoxesMadeChanged(value: String) { _boxesMade.value = value }
     fun onPackingDateChanged(value: String) { _packingDate.value = value }
 
     fun nextStep() {
-        if (_currentWizardStep.value < 4) {
-            // When advancing from step 2 → 3, load production batches for selected batch+flavor
-            if (_currentWizardStep.value == 2) {
-                val code = _batchCode.value
-                val flavorId = _selectedFlavor.value?.id
-                if (code.isNotBlank() && flavorId != null) {
-                    loadProductionBatches(code, flavorId)
-                }
+        val step = _currentWizardStep.value
+        if (step < 3) {
+            if (step == 1) {
+                // Load batches appropriate to the selected packing status
+                loadBatchesForSelectedStatus()
             }
-            _currentWizardStep.value++
+            _currentWizardStep.value = step + 1
         }
     }
 
-    fun previousStep() { if (_currentWizardStep.value > 1) _currentWizardStep.value-- }
+    fun previousStep() {
+        if (_currentWizardStep.value > 1) _currentWizardStep.value--
+    }
+
+    private fun loadBatchesForSelectedStatus() {
+        val status = _selectedPackingStatus.value ?: return
+        viewModelScope.launch {
+            _batchesLoading.value = true
+            when (status) {
+                PackingStatus.Complete -> {
+                    val result = repository.getProductionBatchesForCompletePacking()
+                    _completeBatches.value = result.getOrDefault(emptyList())
+                }
+                PackingStatus.Partial -> {
+                    val result = repository.getProductionBatchesForPartialPacking()
+                    val (partial, unpacked) = result.getOrDefault(Pair(emptyList(), emptyList()))
+                    _partialBatches.value = partial
+                    _unpackedBatches.value = unpacked
+                }
+            }
+            _selectedBatch.value = null
+            _batchesLoading.value = false
+        }
+    }
+
+    private fun refreshBatchLists() {
+        if (_currentWizardStep.value == 2) {
+            loadBatchesForSelectedStatus()
+        }
+    }
 
     fun submit() {
         if (_submitState.value is SubmitState.Loading) return
 
-        val selected = _selectedBatchFlavor.value
-        val code = selected?.batchCode ?: _batchCode.value.trim()
-        if (code.isBlank()) {
-            _submitState.value = SubmitState.Error("Select a batch code")
+        val batch = _selectedBatch.value
+        if (batch == null) {
+            _submitState.value = SubmitState.Error("Select a production batch")
             return
         }
-        val flavor = _selectedFlavor.value
-        if (flavor == null) {
-            _submitState.value = SubmitState.Error("Select a flavour")
-            return
-        }
-        val productionBatch = _selectedProductionBatch.value
-        if (productionBatch == null) {
-            _submitState.value = SubmitState.Error("Select a batch number")
+        val packingStatus = _selectedPackingStatus.value
+        if (packingStatus == null) {
+            _submitState.value = SubmitState.Error("Select a packing status")
             return
         }
         val boxes = _boxesMade.value.toIntOrNull()
@@ -221,28 +153,26 @@ class PackingViewModel @Inject constructor(
             return
         }
         val unitsPacked = boxes * 15
+        val statusStr = if (packingStatus == PackingStatus.Complete) "complete" else "partial"
 
         _submitState.value = SubmitState.Loading
         viewModelScope.launch {
             val result = repository.submitPacking(
-                batchCode = code,
-                flavorId = flavor.id,
+                batchCode = batch.batchCode,
+                flavorId = batch.flavorId,
                 boxesPacked = boxes,
                 unitsPacked = unitsPacked,
                 packingDate = _packingDate.value,
                 workerId = WorkerIdentityStore.workerId,
                 isOnline = isOnline,
-                productionBatchId = productionBatch.id,
+                productionBatchId = batch.id,
+                status = statusStr,
             )
             result.onSuccess {
-                val batchLabel = productionBatch.batchNumber?.let { "#$it" } ?: ""
-                _shiftSummary.value = ShiftSummary(
-                    shift = "Current",
-                    totalPacked = boxes.toString(),
-                    totalBoxes = boxes.toString(),
-                )
+                val batchLabel = batch.batchNumber?.let { "Batch $it" } ?: ""
+                val flavorLabel = batch.flavor?.name ?: ""
                 _submitState.value = SubmitState.Success(
-                    "Packed $boxes boxes ($unitsPacked units) for batch $code $batchLabel — ${flavor.name}"
+                    "Packed $boxes boxes for $batchLabel — $flavorLabel ($statusStr)"
                 )
                 clear()
             }
@@ -253,11 +183,11 @@ class PackingViewModel @Inject constructor(
     }
 
     fun clear() {
-        _selectedBatchFlavor.value = _batchFlavorOptions.value.firstOrNull()
-        _batchCode.value = _selectedBatchFlavor.value?.batchCode ?: ""
-        _selectedFlavor.value = null
-        _productionBatches.value = emptyList()
-        _selectedProductionBatch.value = null
+        _selectedPackingStatus.value = null
+        _selectedBatch.value = null
+        _completeBatches.value = emptyList()
+        _partialBatches.value = emptyList()
+        _unpackedBatches.value = emptyList()
         _boxesMade.value = ""
         _packingDate.value = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         _submitState.value = SubmitState.Idle

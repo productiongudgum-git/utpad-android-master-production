@@ -6,7 +6,7 @@ import com.example.gudgum_prod_flow.data.local.dao.PendingOperationEventDao
 import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
 import com.example.gudgum_prod_flow.data.local.entity.PendingOperationEventEntity
 import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
-import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
+import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchWithPackingDto
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitPackingSessionRequest
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
 import kotlinx.coroutines.Dispatchers
@@ -29,51 +29,48 @@ class PackingRepository @Inject constructor(
 
     fun getActiveFlavors(): Flow<List<CachedFlavorEntity>> = flavorDao.getActiveFlavors()
 
-    suspend fun getOpenBatches(): Result<List<ProductionBatchDto>> = withContext(Dispatchers.IO) {
-        runCatching {
-            val response = api.getOpenBatches()
-            if (response.isSuccessful) {
-                response.body() ?: emptyList()
-            } else {
-                emptyList()
-            }
-        }
-    }
-
-    suspend fun getOpenBatchCodes(): Result<List<String>> = withContext(Dispatchers.IO) {
-        runCatching {
-            val response = api.getOpenBatches()
-            if (response.isSuccessful) {
-                response.body()?.map { it.batchCode }?.distinct() ?: emptyList()
-            } else {
-                emptyList()
-            }
-        }
-    }
-
-    suspend fun getProductionBatches(batchCode: String, flavorId: String): Result<List<ProductionBatchDto>> =
+    /**
+     * Returns all open production batches joined with their packing sessions.
+     * Used to derive which batches still need packing.
+     */
+    private suspend fun getAllBatchesWithPackingStatus(): Result<List<ProductionBatchWithPackingDto>> =
         withContext(Dispatchers.IO) {
             runCatching {
-                Log.d(TAG, "getProductionBatches: querying batch_code=eq.$batchCode flavor_id=eq.$flavorId")
-                val response = api.getProductionBatchesByCodeAndFlavor(
-                    batchCode = "eq.$batchCode",
-                    flavorId = "eq.$flavorId",
-                )
-                val errorBody = if (!response.isSuccessful) response.errorBody()?.string().orEmpty() else ""
-                Log.d(TAG, "getProductionBatches: HTTP ${response.code()} rows=${response.body()?.size} error=${errorBody.ifBlank { "none" }}")
+                val response = api.getProductionBatchesWithPackingStatus()
                 if (response.isSuccessful) {
                     val batches = response.body() ?: emptyList()
-                    batches.forEach { b ->
-                        Log.d(TAG, "  batch id=${b.id} batch_number=${b.batchNumber} expected_boxes=${b.expectedBoxes} date=${b.productionDate}")
+                    // Assign fallback batch_number for rows where it is null
+                    batches.mapIndexed { index, batch ->
+                        if (batch.batchNumber == null) batch.copy(batchNumber = index + 1) else batch
                     }
-                    batches
                 } else {
-                    Log.e(TAG, "getProductionBatches: failed (${response.code()}) $errorBody")
+                    Log.e(TAG, "getAllBatchesWithPackingStatus: HTTP ${response.code()} ${response.errorBody()?.string()}")
                     emptyList()
                 }
-            }.onFailure { e ->
-                Log.e(TAG, "getProductionBatches: exception ${e.message}")
-            }.map { it }
+            }
+        }
+
+    /**
+     * For "Packing Complete" step 2: all open batches that do NOT have a
+     * packing session with status='complete' yet.
+     */
+    suspend fun getProductionBatchesForCompletePacking(): Result<List<ProductionBatchWithPackingDto>> =
+        getAllBatchesWithPackingStatus().map { batches ->
+            batches.filter { !it.hasCompletePacking }
+        }
+
+    /**
+     * For "Yet to Finish Packing" step 2:
+     * Returns Pair(partialBatches, unpackedBatches).
+     * - partialBatches: batches that have at least one packing session (but none with status='complete')
+     * - unpackedBatches: batches with no packing sessions at all
+     */
+    suspend fun getProductionBatchesForPartialPacking(): Result<Pair<List<ProductionBatchWithPackingDto>, List<ProductionBatchWithPackingDto>>> =
+        getAllBatchesWithPackingStatus().map { batches ->
+            val incomplete = batches.filter { !it.hasCompletePacking }
+            val partial = incomplete.filter { it.packingSessions.isNotEmpty() }
+            val unpacked = incomplete.filter { it.packingSessions.isEmpty() }
+            Pair(partial, unpacked)
         }
 
     suspend fun submitPacking(
@@ -85,6 +82,7 @@ class PackingRepository @Inject constructor(
         workerId: String,
         isOnline: Boolean,
         productionBatchId: String? = null,
+        status: String = "partial",
     ): Result<Unit> = withContext(Dispatchers.IO) {
         if (isOnline) {
             runCatching {
@@ -96,6 +94,7 @@ class PackingRepository @Inject constructor(
                     boxesPacked = boxesPacked,
                     unitsPacked = unitsPacked,
                     productionBatchId = productionBatchId,
+                    status = status,
                 )
 
                 val response = api.insertPackingSession(request)
@@ -116,7 +115,7 @@ class PackingRepository @Inject constructor(
                         batchCode = batchCode,
                         quantity = boxesPacked.toDouble(),
                         unit = "boxes",
-                        summary = "Packed $boxesPacked boxes for batch $batchCode",
+                        summary = "Packed $boxesPacked boxes for batch $batchCode ($status)",
                         payloadJson = JSONObject().apply {
                             put("batch_code", batchCode)
                             put("flavor_id", flavorId ?: JSONObject.NULL)
@@ -124,11 +123,11 @@ class PackingRepository @Inject constructor(
                             put("units_packed", unitsPacked ?: JSONObject.NULL)
                             put("session_date", packingDate)
                             put("production_batch_id", productionBatchId ?: JSONObject.NULL)
+                            put("status", status)
                         }.toString(),
                     )
                 )
             }
         }
     }
-
 }
