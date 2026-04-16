@@ -79,10 +79,11 @@ class PackingRepository @Inject constructor(
      * For "Yet to Finish Packing" step 2.
      * Returns Pair(partialBatches, unpackedBatches).
      *
-     * - partialBatches: batches with at least one session where status='partial' exactly
-     * - unpackedBatches: batches with no packing sessions at all
+     * - partialBatches : batches whose sessions are all partial/NULL (no complete session).
+     *                    NULL status is treated the same as 'partial' (legacy rows).
+     * - unpackedBatches: batches with NO packing sessions at all.
      *
-     * Batches that have a session with status='complete' are excluded from both lists.
+     * Batches that have ANY session with status='complete' are excluded from both lists.
      */
     suspend fun getProductionBatchesForPartialPacking(): Result<Pair<List<ProductionBatchWithPackingDto>, List<ProductionBatchWithPackingDto>>> =
         getAllBatchesWithPackingStatus().map { batches ->

@@ -173,10 +173,11 @@ class PackingViewModel @Inject constructor(
             result.onSuccess {
                 val batchLabel = batch.batchNumber?.let { "Batch $it" } ?: ""
                 val flavorLabel = batch.flavor?.name ?: ""
+                // Reset wizard state BEFORE setting Success so clear() doesn't overwrite the success message.
+                clear()
                 _submitState.value = SubmitState.Success(
                     "Packed $boxes boxes for $batchLabel — $flavorLabel ($statusStr)"
                 )
-                clear()
             }
             result.onFailure { e ->
                 _submitState.value = SubmitState.Error(e.message ?: "Submission failed")
@@ -192,7 +193,9 @@ class PackingViewModel @Inject constructor(
         _unpackedBatches.value = emptyList()
         _boxesMade.value = ""
         _packingDate.value = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        _submitState.value = SubmitState.Idle
+        // Do NOT reset _submitState here. The UI dismisses it via clearSubmitState() after
+        // showing the snackbar. Resetting here would wipe the Success state before the UI
+        // can display it (both run on the same coroutine frame).
         _currentWizardStep.value = 1
     }
 
