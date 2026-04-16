@@ -64,6 +64,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchWithPackingDto
+import com.example.gudgum_prod_flow.ui.components.SuccessOverlay
 import com.example.gudgum_prod_flow.ui.navigation.AppRoute
 import com.example.gudgum_prod_flow.ui.theme.UtpadBackground
 import com.example.gudgum_prod_flow.ui.theme.UtpadOutline
@@ -109,16 +110,9 @@ fun PackingScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(submitState) {
-        when (val state = submitState) {
-            is SubmitState.Success -> {
-                snackbarHostState.showSnackbar(state.message)
-                viewModel.clearSubmitState()
-            }
-            is SubmitState.Error -> {
-                snackbarHostState.showSnackbar(state.message)
-                viewModel.clearSubmitState()
-            }
-            else -> {}
+        if (submitState is SubmitState.Error) {
+            snackbarHostState.showSnackbar((submitState as SubmitState.Error).message)
+            viewModel.clearSubmitState()
         }
     }
 
@@ -219,6 +213,13 @@ fun PackingScreen(
                         onFinalStatusSelected = viewModel::onFinalStatusSelected,
                     )
                 }
+            }
+
+            // Success overlay — shown after a successful submission.
+            // clear() was already called inside submit() before setting Success,
+            // so the wizard is already at step 1; only the state needs clearing.
+            if (submitState is SubmitState.Success) {
+                SuccessOverlay(onDismiss = { viewModel.clearSubmitState() })
             }
 
             // ── Bottom action bar ─────────────────────────────────────────────

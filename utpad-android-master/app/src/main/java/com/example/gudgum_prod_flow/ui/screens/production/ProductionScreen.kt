@@ -14,8 +14,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -56,7 +61,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.gudgum_prod_flow.ui.components.SearchableDropdown
+import com.example.gudgum_prod_flow.ui.components.SuccessOverlay
 import com.example.gudgum_prod_flow.ui.navigation.AppRoute
 import com.example.gudgum_prod_flow.ui.viewmodels.ProductionViewModel
 import com.example.gudgum_prod_flow.ui.viewmodels.SubmitState
@@ -95,16 +100,9 @@ fun ProductionScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(submitState) {
-        when (val state = submitState) {
-            is SubmitState.Success -> {
-                snackbarHostState.showSnackbar(state.message)
-                viewModel.clearSubmitState()
-            }
-            is SubmitState.Error -> {
-                snackbarHostState.showSnackbar(state.message)
-                viewModel.clearSubmitState()
-            }
-            else -> {}
+        if (submitState is SubmitState.Error) {
+            snackbarHostState.showSnackbar((submitState as SubmitState.Error).message)
+            viewModel.clearSubmitState()
         }
     }
 
@@ -147,10 +145,8 @@ fun ProductionScreen(
                     .padding(horizontal = 16.dp)
                     // Step 2 bottom bar is taller (totals + buttons), so give more clearance
                     .padding(bottom = if (currentStep == 2) 180.dp else 100.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+                verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Top),
             ) {
-                Spacer(modifier = Modifier.height(4.dp))
-
                 OperationsModuleTabs(
                     currentRoute = AppRoute.Production,
                     allowedRoutes = allowedRoutes,
@@ -179,7 +175,7 @@ fun ProductionScreen(
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
-                                // Flavor Profile dropdown
+                                // Flavor Profile — scrollable card list
                                 Column {
                                     Text(
                                         text = "FLAVOR PROFILE",
@@ -189,13 +185,53 @@ fun ProductionScreen(
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
                                     val flavorsList by viewModel.flavors.collectAsState()
-                                    SearchableDropdown(
-                                        items = flavorsList,
-                                        selectedItem = selectedFlavor,
-                                        onItemSelected = { viewModel.onFlavorSelected(it) },
-                                        itemLabel = { it.name },
-                                        placeholder = "Select Flavor...",
-                                    )
+                                    LazyColumn(
+                                        modifier = Modifier.height(260.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        items(flavorsList) { flavor ->
+                                            val isSelected = selectedFlavor?.id == flavor.id
+                                            Surface(
+                                                onClick = { viewModel.onFlavorSelected(flavor) },
+                                                shape = RoundedCornerShape(16.dp),
+                                                color = if (isSelected) UtpadPrimary.copy(alpha = 0.1f) else UtpadBackground,
+                                                border = BorderStroke(
+                                                    width = if (isSelected) 2.dp else 1.dp,
+                                                    color = if (isSelected) UtpadPrimary else UtpadOutline,
+                                                ),
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = flavor.name,
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = if (isSelected) UtpadPrimary else UtpadTextPrimary,
+                                                        )
+                                                        Text(
+                                                            text = flavor.code,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = if (isSelected) UtpadPrimary.copy(alpha = 0.7f) else UtpadTextSecondary,
+                                                        )
+                                                    }
+                                                    if (isSelected) {
+                                                        Icon(
+                                                            imageVector = Icons.Filled.CheckCircle,
+                                                            contentDescription = null,
+                                                            tint = UtpadPrimary,
+                                                            modifier = Modifier.size(20.dp),
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
 
                                 // Batch Code + Batch Number (read-only, auto-generated)
@@ -473,8 +509,15 @@ fun ProductionScreen(
                         }
                     } // End step 3
                 } // End when
+            }
 
-                Spacer(modifier = Modifier.height(16.dp))
+            // Success overlay — shown after a successful submission.
+            // Dismisses after 2 seconds and resets the wizard.
+            if (submitState is SubmitState.Success) {
+                SuccessOverlay(onDismiss = {
+                    viewModel.clearSubmitState()
+                    viewModel.reset()
+                })
             }
 
             // Bottom action bar — also shows step 2 totals pinned above buttons

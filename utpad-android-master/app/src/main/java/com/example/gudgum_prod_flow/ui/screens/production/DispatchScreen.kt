@@ -1,7 +1,11 @@
 package com.example.gudgum_prod_flow.ui.screens.production
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -58,7 +62,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.gudgum_prod_flow.ui.components.SearchableDropdown
+import com.example.gudgum_prod_flow.ui.components.SuccessOverlay
 import com.example.gudgum_prod_flow.ui.navigation.AppRoute
 import com.example.gudgum_prod_flow.ui.theme.UtpadBackground
 import com.example.gudgum_prod_flow.ui.theme.UtpadError
@@ -103,16 +107,9 @@ fun DispatchScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(submitState) {
-        when (val state = submitState) {
-            is SubmitState.Success -> {
-                snackbarHostState.showSnackbar(state.message)
-                viewModel.clearSubmitState()
-            }
-            is SubmitState.Error -> {
-                snackbarHostState.showSnackbar(state.message)
-                viewModel.clearSubmitState()
-            }
-            else -> {}
+        if (submitState is SubmitState.Error) {
+            snackbarHostState.showSnackbar((submitState as SubmitState.Error).message)
+            viewModel.clearSubmitState()
         }
     }
 
@@ -148,7 +145,7 @@ fun DispatchScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp)
                     .padding(bottom = 132.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+                verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Top),
             ) {
                 OperationsModuleTabs(
                     currentRoute = AppRoute.Dispatch,
@@ -198,19 +195,72 @@ fun DispatchScreen(
                                         )
                                         Text("Loading invoices...", color = UtpadTextSecondary, style = MaterialTheme.typography.bodySmall)
                                     }
-                                } else {
-                                    SearchableDropdown(
-                                        items = invoices,
-                                        selectedItem = selectedInvoice,
-                                        onItemSelected = { viewModel.onInvoiceSelected(it) },
-                                        itemLabel = { "${it.invoiceNumber} — ${it.customerName}" },
-                                        placeholder = "Search invoice...",
-                                    )
+                                } else if (invoices.isEmpty()) {
                                     Text(
-                                        text = "Select an unpacked/undispatched invoice to begin.",
+                                        text = "No pending invoices found.",
                                         color = UtpadTextSecondary,
                                         style = MaterialTheme.typography.bodySmall,
                                     )
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.height(300.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        items(invoices) { invoice ->
+                                            val isSelected = selectedInvoice?.id == invoice.id
+                                            val totalBoxes = invoice.items.sumOf {
+                                                if (it.quantityBoxes != null && it.quantityBoxes > 0) it.quantityBoxes
+                                                else Math.ceil(it.quantityUnits / 15.0).toInt()
+                                            }
+                                            Surface(
+                                                onClick = { viewModel.onInvoiceSelected(invoice) },
+                                                shape = RoundedCornerShape(16.dp),
+                                                color = if (isSelected) UtpadPrimary.copy(alpha = 0.1f) else UtpadBackground,
+                                                border = androidx.compose.foundation.BorderStroke(
+                                                    width = if (isSelected) 2.dp else 1.dp,
+                                                    color = if (isSelected) UtpadPrimary else UtpadOutline,
+                                                ),
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = invoice.invoiceNumber,
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = if (isSelected) UtpadPrimary else UtpadTextPrimary,
+                                                        )
+                                                        Text(
+                                                            text = invoice.customerName,
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = if (isSelected) UtpadPrimary.copy(alpha = 0.7f) else UtpadTextSecondary,
+                                                        )
+                                                    }
+                                                    Column(horizontalAlignment = Alignment.End) {
+                                                        Text(
+                                                            text = "$totalBoxes boxes",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = if (isSelected) UtpadPrimary else UtpadTextSecondary,
+                                                        )
+                                                        if (isSelected) {
+                                                            Icon(
+                                                                imageVector = Icons.Filled.CheckCircle,
+                                                                contentDescription = null,
+                                                                tint = UtpadPrimary,
+                                                                modifier = Modifier.size(16.dp),
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -653,6 +703,15 @@ fun DispatchScreen(
 
             }
 
+            // Success overlay — shown after a successful submission.
+            // Dismisses after 2 seconds and resets the wizard to step 1.
+            if (submitState is SubmitState.Success) {
+                SuccessOverlay(onDismiss = {
+                    viewModel.clearSubmitState()
+                    viewModel.reset()
+                })
+            }
+
             // Bottom action bar
             Surface(
                 modifier = Modifier
@@ -699,15 +758,6 @@ fun DispatchScreen(
                                 if (currentStep < 5) "Continue" else "Confirm Dispatch",
                                 fontWeight = FontWeight.Bold
                             )
-                        }
-                    }
-                    if (AppRoute.Inwarding in allowedRoutes) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        TextButton(
-                            onClick = { onNavigateToRoute(AppRoute.Inwarding) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("Back to Inwarding", color = UtpadPrimary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

@@ -71,6 +71,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import com.example.gudgum_prod_flow.ui.components.BarcodeScannerButton
+import com.example.gudgum_prod_flow.ui.components.SuccessOverlay
 import com.example.gudgum_prod_flow.ui.theme.UtpadPrimary
 import com.example.gudgum_prod_flow.ui.theme.UtpadSuccess
 import com.example.gudgum_prod_flow.ui.theme.UtpadOutline
@@ -128,16 +129,9 @@ fun InwardingScreen(
     val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(submitState) {
-        when (val state = submitState) {
-            is SubmitState.Success -> {
-                snackbarHostState.showSnackbar(state.message)
-                viewModel.clearSubmitState()
-            }
-            is SubmitState.Error -> {
-                snackbarHostState.showSnackbar(state.message)
-                viewModel.clearSubmitState()
-            }
-            else -> Unit
+        if (submitState is SubmitState.Error) {
+            snackbarHostState.showSnackbar((submitState as SubmitState.Error).message)
+            viewModel.clearSubmitState()
         }
     }
     LaunchedEffect(addIngredientState) {
@@ -193,7 +187,7 @@ fun InwardingScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp)
                     .padding(bottom = 132.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+                verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Top),
             ) {
                 OperationsModuleTabs(
                     currentRoute = AppRoute.Inwarding,
@@ -548,6 +542,15 @@ fun InwardingScreen(
         }
     }
 
+            // Success overlay — shown after a successful submission.
+            // Dismisses after 2 seconds and resets the wizard to step 1.
+            if (submitState is SubmitState.Success) {
+                SuccessOverlay(onDismiss = {
+                    viewModel.clearSubmitState()
+                    viewModel.reset()
+                })
+            }
+
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -607,14 +610,6 @@ fun InwardingScreen(
                             } else {
                                 Text("Confirm Inward", fontWeight = FontWeight.Bold)
                             }
-                        }
-                    }
-                    if (AppRoute.Production in allowedRoutes) {
-                        TextButton(
-                            onClick = { onNavigateToRoute(AppRoute.Production) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("Continue to Production")
                         }
                     }
                 }
