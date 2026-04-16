@@ -89,9 +89,9 @@ class PackingRepository @Inject constructor(
             // Exclude batches that already have a confirmed-complete packing session
             val notFullyPacked = batches.filter { !it.hasCompletePacking }
 
-            // Left column: has at least one session explicitly marked status='partial'
+            // Left column: has at least one session marked status='partial' or status=NULL
             val partial = notFullyPacked.filter { batch ->
-                batch.packingSessions.any { session -> session.status == "partial" }
+                batch.packingSessions.any { session -> session.status == "partial" || session.status == null }
             }
 
             // Right column: no packing sessions at all

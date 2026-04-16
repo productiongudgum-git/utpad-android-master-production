@@ -1,5 +1,6 @@
 package com.example.gudgum_prod_flow.ui.viewmodels
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchWithPackingDto
@@ -154,6 +155,7 @@ class PackingViewModel @Inject constructor(
         }
         val unitsPacked = boxes * 15
         val statusStr = if (packingStatus == PackingStatus.Complete) "complete" else "partial"
+        Log.d(TAG, "submit: statusStr='$statusStr' batchCode=${batch.batchCode} productionBatchId=${batch.id} boxes=$boxes")
 
         _submitState.value = SubmitState.Loading
         viewModelScope.launch {
