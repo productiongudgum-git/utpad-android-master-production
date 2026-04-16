@@ -25,7 +25,7 @@ class AuthRepository @Inject constructor(
     }
 
     private val api = SupabaseApiClient.api
-    private val mobileModules = setOf("inwarding", "production", "packing", "dispatch")
+    private val mobileModules = setOf("inwarding", "production", "packing", "dispatch", "returns")
 
     val isLoggedIn: Flow<Boolean> = tokenManager.isLoggedIn
 

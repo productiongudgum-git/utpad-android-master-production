@@ -128,6 +128,9 @@ class AuthViewModel @Inject constructor(
             .mapNotNull { moduleToRoute(it) }
             .toCollection(linkedSetOf())
 
+        // Returns is always bundled with Dispatch — a worker who can dispatch can also process returns
+        if (AppRoute.Dispatch in fromModules) fromModules.add(AppRoute.Returns)
+
         if (fromModules.isNotEmpty()) return fromModules
 
         return when (role.trim().lowercase().replace('-', '_').replace(' ', '_')) {
