@@ -32,6 +32,9 @@ class PackingRepository @Inject constructor(
     /**
      * Returns all open production batches joined with their packing sessions.
      * Used to derive which batches still need packing.
+     *
+     * NOTE: Requires a FK from packing_sessions.production_batch_id → production_batches.id
+     * in Supabase for the embedded select to work.
      */
     private suspend fun getAllBatchesWithPackingStatus(): Result<List<ProductionBatchWithPackingDto>> =
         withContext(Dispatchers.IO) {
@@ -39,12 +42,23 @@ class PackingRepository @Inject constructor(
                 val response = api.getProductionBatchesWithPackingStatus()
                 if (response.isSuccessful) {
                     val batches = response.body() ?: emptyList()
+                    Log.d(TAG, "getAllBatchesWithPackingStatus: ${batches.size} open production batches")
+                    batches.forEach { batch ->
+                        val sessionSummary = if (batch.packingSessions.isEmpty()) {
+                            "no sessions"
+                        } else {
+                            batch.packingSessions.joinToString { "status=${it.status ?: "NULL"}" }
+                        }
+                        Log.d(TAG, "  batch=${batch.batchCode} #${batch.batchNumber} sessions=[${sessionSummary}]")
+                    }
                     // Assign fallback batch_number for rows where it is null
                     batches.mapIndexed { index, batch ->
                         if (batch.batchNumber == null) batch.copy(batchNumber = index + 1) else batch
                     }
                 } else {
-                    Log.e(TAG, "getAllBatchesWithPackingStatus: HTTP ${response.code()} ${response.errorBody()?.string()}")
+                    val errorBody = response.errorBody()?.string()
+                    Log.e(TAG, "getAllBatchesWithPackingStatus: HTTP ${response.code()} — $errorBody")
+                    Log.e(TAG, "  ^^^ If 400: check that (a) packing_sessions has a FK to production_batches and (b) the 'status' column exists in packing_sessions")
                     emptyList()
                 }
             }
@@ -56,20 +70,44 @@ class PackingRepository @Inject constructor(
      */
     suspend fun getProductionBatchesForCompletePacking(): Result<List<ProductionBatchWithPackingDto>> =
         getAllBatchesWithPackingStatus().map { batches ->
-            batches.filter { !it.hasCompletePacking }
+            val result = batches.filter { !it.hasCompletePacking }
+            Log.d(TAG, "getProductionBatchesForCompletePacking: ${result.size} batches (of ${batches.size}) have no complete session")
+            result
         }
 
     /**
-     * For "Yet to Finish Packing" step 2:
+     * For "Yet to Finish Packing" step 2.
      * Returns Pair(partialBatches, unpackedBatches).
-     * - partialBatches: batches that have at least one packing session (but none with status='complete')
+     *
+     * - partialBatches: batches with at least one session where status='partial' exactly
      * - unpackedBatches: batches with no packing sessions at all
+     *
+     * Batches that have a session with status='complete' are excluded from both lists.
      */
     suspend fun getProductionBatchesForPartialPacking(): Result<Pair<List<ProductionBatchWithPackingDto>, List<ProductionBatchWithPackingDto>>> =
         getAllBatchesWithPackingStatus().map { batches ->
-            val incomplete = batches.filter { !it.hasCompletePacking }
-            val partial = incomplete.filter { it.packingSessions.isNotEmpty() }
-            val unpacked = incomplete.filter { it.packingSessions.isEmpty() }
+            // Exclude batches that already have a confirmed-complete packing session
+            val notFullyPacked = batches.filter { !it.hasCompletePacking }
+
+            // Left column: has at least one session explicitly marked status='partial'
+            val partial = notFullyPacked.filter { batch ->
+                batch.packingSessions.any { session -> session.status == "partial" }
+            }
+
+            // Right column: no packing sessions at all
+            val unpacked = notFullyPacked.filter { it.packingSessions.isEmpty() }
+
+            Log.d(TAG, "getProductionBatchesForPartialPacking: partial=${partial.size}, unpacked=${unpacked.size} (notFullyPacked=${notFullyPacked.size}, total=${batches.size})")
+            partial.forEach { b ->
+                Log.d(TAG, "  [partial-left] batch=${b.batchCode} #${b.batchNumber}")
+                b.packingSessions.forEachIndexed { i, s ->
+                    Log.d(TAG, "    session[$i] id=${s.id} status=${s.status ?: "NULL"} production_batch_id=${s.productionBatchId}")
+                }
+            }
+            unpacked.forEach { b ->
+                Log.d(TAG, "  [unpacked-right] batch=${b.batchCode} #${b.batchNumber} (0 sessions)")
+            }
+
             Pair(partial, unpacked)
         }
 

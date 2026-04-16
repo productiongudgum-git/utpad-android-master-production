@@ -135,8 +135,13 @@ data class ProductionBatchWithPackingDto(
             return "$batchCode - $batchPart - $flavorPart - $boxesPart"
         }
 
+    /** True only if at least one session is explicitly marked 'complete'. NULL/partial don't count. */
     val hasCompletePacking: Boolean
         get() = packingSessions.any { it.status == "complete" }
+
+    /** True if there are sessions but none are 'complete' (covers status='partial' and legacy NULL rows). */
+    val hasPartialOrLegacySessions: Boolean
+        get() = packingSessions.isNotEmpty() && !hasCompletePacking
 }
 
 // ── Dispatch Events (dispatch_events) ──────────────────────────────
