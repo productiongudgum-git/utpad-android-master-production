@@ -189,6 +189,7 @@ data class InvoiceDto(
     @SerialName("is_packed") val isPacked: Boolean = false,
     @SerialName("is_dispatched") val isDispatched: Boolean = false,
     @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("packed_at") val packedAt: String? = null,
     val items: List<InvoiceItemJson> = emptyList(),
 )
 

@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(xargs grep:*)",
-      "Bash(grep \".kt$\")"
+      "Bash(grep \".kt$\")",
+      "Bash(./gradlew :app:compileDebugKotlin --no-daemon)"
     ]
   }
 }

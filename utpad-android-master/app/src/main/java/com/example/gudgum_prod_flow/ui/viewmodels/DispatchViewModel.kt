@@ -21,6 +21,16 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
+/** Top-level screen state for the Dispatch module. */
+sealed class DispatchScreenState {
+    /** Default: 2-column kanban overview of all undispatched invoices. */
+    object Overview : DispatchScreenState()
+    /** Full 5-step wizard for a not-yet-packed (red) invoice. */
+    object RedWizard : DispatchScreenState()
+    /** Simple confirmation screen for a packed-but-not-dispatched (yellow) invoice. */
+    data class YellowConfirm(val invoice: InvoiceDto) : DispatchScreenState()
+}
+
 /** A display-friendly FIFO allocation row */
 data class FifoDisplayLine(
     val inventoryId: String,
@@ -36,6 +46,20 @@ class DispatchViewModel @Inject constructor(
 ) : ViewModel() {
 
     companion object { private const val TAG = "DispatchViewModel" }
+
+    // ── Screen-level state ─────────────────────────────────────────
+    private val _screenState = MutableStateFlow<DispatchScreenState>(DispatchScreenState.Overview)
+    val screenState: StateFlow<DispatchScreenState> = _screenState.asStateFlow()
+
+    // ── Overview: red (not packed) and yellow (packed, not dispatched) ──
+    private val _redInvoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
+    val redInvoices: StateFlow<List<InvoiceDto>> = _redInvoices.asStateFlow()
+
+    private val _yellowInvoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
+    val yellowInvoices: StateFlow<List<InvoiceDto>> = _yellowInvoices.asStateFlow()
+
+    private val _yellowDispatchLoading = MutableStateFlow(false)
+    val yellowDispatchLoading: StateFlow<Boolean> = _yellowDispatchLoading.asStateFlow()
 
     // ── Step 1: Invoice selection ──────────────────────────────────
     private val _invoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
@@ -79,14 +103,13 @@ class DispatchViewModel @Inject constructor(
     )
     val dispatchDate: StateFlow<String> = _dispatchDate.asStateFlow()
 
-    // ── FIX 1: pre-packed detection — skip steps 2-4 ───────────────
+    // ── Pre-packed detection — skip steps 2-4 ─────────────────────
     private val _invoiceAlreadyPacked = MutableStateFlow(false)
     val invoiceAlreadyPacked: StateFlow<Boolean> = _invoiceAlreadyPacked.asStateFlow()
 
-    // ── FIX 1: already-dispatched boxes per flavor for this invoice (delta calc) ──
     private val _alreadyDispatchedPerFlavor = MutableStateFlow<Map<String, Int>>(emptyMap())
 
-    // ── FIX 2: stock availability check before Step 5 submit ───────
+    // ── Stock availability check before Step 5 submit ─────────────
     private val _stockCheckError = MutableStateFlow<String?>(null)
     val stockCheckError: StateFlow<String?> = _stockCheckError.asStateFlow()
 
@@ -128,8 +151,64 @@ class DispatchViewModel @Inject constructor(
             result.onSuccess { list ->
                 _invoices.value = list
                 _allInvoices.value = list
+                _redInvoices.value = list.filter { !it.isPacked }
+                _yellowInvoices.value = list.filter { it.isPacked }
             }
             _invoicesLoading.value = false
+        }
+    }
+
+    // ── Screen navigation ──────────────────────────────────────────
+
+    /** Tap a red (not-packed) card: pre-select invoice and enter the 5-step wizard. */
+    fun openRedWizard(invoice: InvoiceDto) {
+        onInvoiceSelected(invoice)
+        _currentWizardStep.value = 1
+        _screenState.value = DispatchScreenState.RedWizard
+    }
+
+    /** Tap a yellow (packed) card: show the simple confirmation screen. */
+    fun openYellowConfirm(invoice: InvoiceDto) {
+        _screenState.value = DispatchScreenState.YellowConfirm(invoice)
+    }
+
+    /** Navigate back to the 2-column overview and clear wizard state. */
+    fun backToOverview() {
+        _screenState.value = DispatchScreenState.Overview
+        _selectedInvoice.value = null
+        _invoiceItems.value = emptyList()
+        _selectedItem.value = null
+        _boxesToDispatch.value = ""
+        _fifoLines.value = emptyList()
+        _fifoError.value = null
+        _inventoryForFlavor.value = emptyList()
+        _isPacked.value = false
+        _isDispatched.value = false
+        _currentWizardStep.value = 1
+        _invoiceAlreadyPacked.value = false
+        _stockCheckError.value = null
+        _stockCheckLoading.value = false
+    }
+
+    /** Confirm dispatch for a yellow (already-packed) invoice — sets is_dispatched=true. */
+    fun confirmYellowDispatch(invoice: InvoiceDto) {
+        if (_yellowDispatchLoading.value) return
+        _yellowDispatchLoading.value = true
+        viewModelScope.launch {
+            val result = repository.updateInvoiceStatus(
+                invoiceId = invoice.id,
+                isDispatched = true,
+            )
+            result.onSuccess {
+                Log.d(TAG, "confirmYellowDispatch success for ${invoice.invoiceNumber}")
+                loadInvoices()
+                _screenState.value = DispatchScreenState.Overview
+            }
+            result.onFailure { e ->
+                Log.e(TAG, "confirmYellowDispatch failed: ${e.message}", e)
+                _submitState.value = SubmitState.Error(e.message ?: "Dispatch failed")
+            }
+            _yellowDispatchLoading.value = false
         }
     }
 
@@ -142,7 +221,7 @@ class DispatchViewModel @Inject constructor(
         _boxesToDispatch.value = ""
         _stockCheckError.value = null
 
-        // FIX 2: merge duplicate flavors by summing their boxes before building item list
+        // Merge duplicate flavors by summing their boxes before building item list
         _invoiceItems.value = invoice.items
             .groupBy { it.flavorId }
             .map { (flavorId, group) ->
@@ -160,11 +239,11 @@ class DispatchViewModel @Inject constructor(
                 )
             }
 
-        // FIX 1: if already packed, pre-tick the checkbox so Step 5 validation passes
+        // If already packed, pre-tick the checkbox so Step 5 validation passes
         _invoiceAlreadyPacked.value = invoice.isPacked
         _isPacked.value = invoice.isPacked
 
-        // FIX 1: fetch already-dispatched boxes per flavor so delta can be computed in onItemSelected()
+        // Fetch already-dispatched boxes per flavor so delta can be computed in onItemSelected()
         _alreadyDispatchedPerFlavor.value = emptyMap()
         viewModelScope.launch {
             repository.getAlreadyDispatchedPerFlavor(invoice.id)
@@ -179,12 +258,11 @@ class DispatchViewModel @Inject constructor(
         _selectedItem.value = item
         _fifoLines.value = emptyList()
 
-        // FIX 1: only allocate FIFO for the delta (new boxes beyond what's already dispatched)
+        // Only allocate FIFO for the delta (new boxes beyond what's already dispatched)
         val alreadyDispatched = _alreadyDispatchedPerFlavor.value[item.flavorId] ?: 0
         val delta = maxOf(0, item.resolvedBoxes - alreadyDispatched)
         _boxesToDispatch.value = delta.toString()
 
-        // Load inventory for this flavor
         viewModelScope.launch {
             val result = repository.getInventoryByFlavor(item.flavorId)
             result.onSuccess { inventory ->
@@ -205,7 +283,7 @@ class DispatchViewModel @Inject constructor(
         computeFifo()
     }
 
-    /** FIFO allocation: sort batches by oldest packing session_date ASC, allocate from available boxes (packed - dispatched) */
+    /** FIFO allocation: sort batches by oldest packing session_date ASC, allocate from available boxes. */
     private fun computeFifo() {
         val needed = _boxesToDispatch.value.toIntOrNull() ?: 0
         if (needed <= 0) {
@@ -249,8 +327,6 @@ class DispatchViewModel @Inject constructor(
     fun onDispatchedToggle(value: Boolean) { _isDispatched.value = value }
     fun onDispatchDateChanged(value: String) { _dispatchDate.value = value }
 
-    // ── FIX 2: stock availability check ────────────────────────────
-
     /** Checks total available stock vs total required boxes for all items in the invoice. */
     private fun checkStockForInvoice() {
         val items = _invoiceItems.value
@@ -265,7 +341,6 @@ class DispatchViewModel @Inject constructor(
             var totalAvailable = 0
             var fetchFailed = false
             for (item in items) {
-                // FIX 1: require only the delta, not the full invoice amount
                 val alreadyDispatched = _alreadyDispatchedPerFlavor.value[item.flavorId] ?: 0
                 totalRequired += maxOf(0, item.resolvedBoxes - alreadyDispatched)
                 repository.getInventoryByFlavor(item.flavorId)
@@ -287,14 +362,13 @@ class DispatchViewModel @Inject constructor(
     fun nextStep() {
         val step = _currentWizardStep.value
         when {
-            // FIX 1: invoice already packed — jump from Step 1 directly to Step 5
-            // Stock was verified at packing time; skip the check entirely.
+            // Invoice already packed — jump from Step 1 directly to Step 5
             step == 1 && _invoiceAlreadyPacked.value -> {
                 _currentWizardStep.value = 5
             }
             step < 5 -> {
                 _currentWizardStep.value = step + 1
-                // FIX 2: trigger stock check only for the normal (unpacked) FIFO flow
+                // Trigger stock check only for the normal (unpacked) FIFO flow
                 if (step + 1 == 5 && !_invoiceAlreadyPacked.value) checkStockForInvoice()
             }
         }
@@ -303,7 +377,7 @@ class DispatchViewModel @Inject constructor(
     fun previousStep() {
         val step = _currentWizardStep.value
         when {
-            // FIX 1: pre-packed invoice — Back from Step 5 returns to Step 1
+            // Pre-packed invoice — Back from Step 5 returns to Step 1
             step == 5 && _invoiceAlreadyPacked.value -> _currentWizardStep.value = 1
             step > 1 -> _currentWizardStep.value = step - 1
         }
@@ -320,14 +394,11 @@ class DispatchViewModel @Inject constructor(
             _submitState.value = SubmitState.Error("Select an invoice")
             return
         }
-        // Validate against the wizard checkbox (_isPacked), not the stale DB value (invoice.isPacked)
         if (!_isPacked.value) {
             Log.d(TAG, "submit() blocked: isPacked checkbox is false for invoice ${invoice.invoiceNumber}")
             _submitState.value = SubmitState.Error("This invoice has not been packed yet. Please mark it as packed before dispatching.")
             return
         }
-        // FIX 2: block if stock check found insufficient stock (normal flow only)
-        // Pre-packed invoices skip the stock check — stock was verified at packing time.
         if (!_invoiceAlreadyPacked.value) {
             val stockErr = _stockCheckError.value
             if (stockErr != null) {
@@ -337,7 +408,7 @@ class DispatchViewModel @Inject constructor(
             }
         }
 
-        // FIX 1: pre-packed path — steps 2-4 were skipped, just update dispatch status
+        // Pre-packed path — steps 2-4 were skipped, just update dispatch status
         if (_invoiceAlreadyPacked.value) {
             Log.d(TAG, "submit() pre-packed path — invoice=${invoice.invoiceNumber}, isDispatched=${_isDispatched.value}")
             _submitState.value = SubmitState.Loading
@@ -462,6 +533,7 @@ class DispatchViewModel @Inject constructor(
         _alreadyDispatchedPerFlavor.value = emptyMap()
         _stockCheckError.value = null
         _stockCheckLoading.value = false
+        _screenState.value = DispatchScreenState.Overview
     }
 
     fun clearSubmitState() { _submitState.value = SubmitState.Idle }
