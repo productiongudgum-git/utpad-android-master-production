@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.AssignmentReturn
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.LocalShipping
 import androidx.compose.material.icons.outlined.PrecisionManufacturing
@@ -45,6 +46,7 @@ private val moduleTabs = listOf(
     ModuleTab(AppRoute.Production, "Production", Icons.Outlined.PrecisionManufacturing),
     ModuleTab(AppRoute.Packing, "Packing", Icons.Outlined.Widgets),
     ModuleTab(AppRoute.Dispatch, "Dispatch", Icons.Outlined.LocalShipping),
+    ModuleTab(AppRoute.Returns, "Returns", Icons.AutoMirrored.Outlined.AssignmentReturn),
 )
 
 @Composable

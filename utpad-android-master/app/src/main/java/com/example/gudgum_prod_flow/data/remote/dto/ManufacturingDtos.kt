@@ -255,6 +255,31 @@ data class SubmitReturnEventRequest(
     @SerialName("worker_id") val workerId: String,
 )
 
+/** Insert body for returns_events — maps to the actual table columns exactly */
+@Serializable
+data class ReturnEventInsertRequest(
+    @SerialName("batch_code") val batchCode: String,
+    @SerialName("sku_id") val skuId: String?,          // flavor_id → sku_id in table
+    @SerialName("qty_returned") val qtyReturned: Int,
+    val reason: String? = null,
+    @SerialName("return_date") val returnDate: String,
+    @SerialName("worker_id") val workerId: String,
+    @SerialName("invoice_id") val invoiceId: String,
+)
+
+/** Projection for summing qty_returned by batch_code */
+@Serializable
+data class ReturnEventSumDto(
+    @SerialName("batch_code") val batchCode: String,
+    @SerialName("qty_returned") val qtyReturned: Int = 0,
+)
+
+/** PATCH body for updating return_status on gg_invoices */
+@Serializable
+data class UpdateInvoiceReturnStatusRequest(
+    @SerialName("return_status") val returnStatus: String,
+)
+
 // ── FIFO ───────────────────────────────────────────────────────────
 @Serializable
 data class FifoAllocationRequest(

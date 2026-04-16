@@ -167,6 +167,39 @@ interface SupabaseApiService {
         @Header("Prefer") prefer: String = "return=minimal",
     ): Response<Unit>
 
+    // ── Returns module ─────────────────────────────────────────────
+
+    /** Search a dispatched invoice by its invoice_number. */
+    @GET("rest/v1/gg_invoices")
+    suspend fun searchInvoiceByNumber(
+        @Query("invoice_number") invoiceNumber: String,   // "eq.{number}"
+        @Query("is_dispatched") isDispatched: String = "eq.true",
+        @Query("select") select: String = "*",
+        @Query("limit") limit: Int = 1,
+    ): Response<List<InvoiceDto>>
+
+    /** Insert a returns_events row using exact table columns. */
+    @POST("rest/v1/returns_events")
+    suspend fun insertReturnsEvent(
+        @Body request: ReturnEventInsertRequest,
+        @Header("Prefer") prefer: String = "return=minimal",
+    ): Response<Unit>
+
+    /** Fetch returns for a set of batch_codes (for computing return_status). */
+    @GET("rest/v1/returns_events")
+    suspend fun getReturnsByBatchCodes(
+        @Query("batch_code") batchCodeIn: String,   // "in.(code1,code2)"
+        @Query("select") select: String = "batch_code,qty_returned",
+    ): Response<List<ReturnEventSumDto>>
+
+    /** Update return_status on gg_invoices. */
+    @PATCH("rest/v1/gg_invoices")
+    suspend fun updateInvoiceReturnStatus(
+        @Query("id") invoiceId: String,   // "eq.{id}"
+        @Body body: UpdateInvoiceReturnStatusRequest,
+        @Header("Prefer") prefer: String = "return=minimal",
+    ): Response<Unit>
+
     // ── Inwarding (gg_inwarding) ───────────────────────────────────
     @POST("rest/v1/gg_inwarding")
     suspend fun insertGgInwarding(

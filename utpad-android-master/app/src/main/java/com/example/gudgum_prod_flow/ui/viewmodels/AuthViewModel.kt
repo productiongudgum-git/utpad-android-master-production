@@ -134,12 +134,13 @@ class AuthViewModel @Inject constructor(
             "inwarding", "inwarding_staff" -> linkedSetOf(AppRoute.Inwarding)
             "production", "production_operator" -> linkedSetOf(AppRoute.Production)
             "packing", "packing_staff" -> linkedSetOf(AppRoute.Packing)
-            "dispatch", "dispatch_staff" -> linkedSetOf(AppRoute.Dispatch)
+            "dispatch", "dispatch_staff" -> linkedSetOf(AppRoute.Dispatch, AppRoute.Returns)
             "factory_supervisor", "tenant_admin", "platform_admin", "worker" -> linkedSetOf(
                 AppRoute.Inwarding,
                 AppRoute.Production,
                 AppRoute.Packing,
                 AppRoute.Dispatch,
+                AppRoute.Returns,
             )
             else -> emptySet()
         }
@@ -151,6 +152,7 @@ class AuthViewModel @Inject constructor(
             "production" -> AppRoute.Production
             "packing" -> AppRoute.Packing
             "dispatch" -> AppRoute.Dispatch
+            "returns" -> AppRoute.Returns
             else -> null
         }
     }

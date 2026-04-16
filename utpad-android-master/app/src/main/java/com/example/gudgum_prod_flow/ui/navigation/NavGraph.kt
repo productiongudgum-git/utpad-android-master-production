@@ -15,6 +15,7 @@ import com.example.gudgum_prod_flow.ui.screens.production.InwardingScreen
 import com.example.gudgum_prod_flow.ui.screens.production.ModuleSelectorScreen
 import com.example.gudgum_prod_flow.ui.screens.production.PackingScreen
 import com.example.gudgum_prod_flow.ui.screens.production.ProductionScreen
+import com.example.gudgum_prod_flow.ui.screens.returns.ReturnsScreen
 import com.example.gudgum_prod_flow.ui.viewmodels.AuthViewModel
 
 @Composable
@@ -82,6 +83,7 @@ fun UtpadNavGraph(navController: NavHostController) {
             AppRoute.Production to { ProductionScreen(allowedRoutes = allowedRoutes, onBack = { navController.navigate(AppRoute.ModuleSelector) { launchSingleTop = true } }, onLogout = ::logoutAndNavigateToLogin, onNavigateToRoute = ::navigateToAuthorizedRoute) },
             AppRoute.Packing to { PackingScreen(allowedRoutes = allowedRoutes, onBack = { navController.navigate(AppRoute.ModuleSelector) { launchSingleTop = true } }, onLogout = ::logoutAndNavigateToLogin, onNavigateToRoute = ::navigateToAuthorizedRoute) },
             AppRoute.Dispatch to { DispatchScreen(allowedRoutes = allowedRoutes, onBack = { navController.navigate(AppRoute.ModuleSelector) { launchSingleTop = true } }, onLogout = ::logoutAndNavigateToLogin, onNavigateToRoute = ::navigateToAuthorizedRoute) },
+            AppRoute.Returns to { ReturnsScreen(allowedRoutes = allowedRoutes, onBack = { navController.navigate(AppRoute.ModuleSelector) { launchSingleTop = true } }, onLogout = ::logoutAndNavigateToLogin, onNavigateToRoute = ::navigateToAuthorizedRoute) },
         ).forEach { (route, screen) ->
             composable(route) {
                 val canAccess = route in allowedRoutes

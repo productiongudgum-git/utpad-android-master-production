@@ -21,6 +21,7 @@ fun ModuleSelectorScreen(
         AppRoute.Production to "Production",
         AppRoute.Packing    to "Packing",
         AppRoute.Dispatch   to "Dispatch",
+        AppRoute.Returns    to "Returns",
     )
 
     Scaffold { padding ->
