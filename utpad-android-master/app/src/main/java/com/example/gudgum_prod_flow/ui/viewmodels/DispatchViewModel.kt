@@ -166,9 +166,9 @@ class DispatchViewModel @Inject constructor(
             val hasAnyPriorDispatch = alreadyDispatchedMap.values.any { it > 0 }
 
             if (!hasAnyPriorDispatch) {
-                // Case 1: never dispatched — auto-dispatch all, no user input needed
+                // Case 1: never dispatched — simple confirm, no FIFO needed
                 _isDispatched.value = true
-                loadMultiFifoForInvoice(isYellowFlow = false)
+                _multiFifoLoading.value = false  // no FIFO computation, button immediately ready
                 // screen stays at YellowConfirm
             } else {
                 // Case 2: partially dispatched — show FIFO wizard for remaining flavors
@@ -292,7 +292,14 @@ class DispatchViewModel @Inject constructor(
     // ── Navigation ─────────────────────────────────────────────────
 
     fun nextStep() {
-        if (_currentWizardStep.value < 2) _currentWizardStep.value = 2
+        if (_currentWizardStep.value < 2) {
+            _currentWizardStep.value = 2
+            // Auto-tick "dispatched" when every flavor has sufficient stock
+            val allocs = _multiFifoAllocations.value
+            if (allocs.isNotEmpty() && allocs.all { it.isSufficient }) {
+                _isDispatched.value = true
+            }
+        }
     }
 
     fun previousStep() {
@@ -309,6 +316,13 @@ class DispatchViewModel @Inject constructor(
             _submitState.value = SubmitState.Error("No invoice selected")
             return
         }
+
+        // Case 1 yellow: never dispatched, no pre-computed FIFO — repo handles it at submit time
+        if (_screenState.value == DispatchScreenState.YellowConfirm) {
+            submitYellowCase1(invoice)
+            return
+        }
+
         if (!_isPacked.value) {
             _submitState.value = SubmitState.Error("Mark invoice as packed before dispatching")
             return
@@ -366,6 +380,35 @@ class DispatchViewModel @Inject constructor(
             }
             result.onFailure { e ->
                 Log.e(TAG, "submit() failed: ${e.message}", e)
+                _submitState.value = SubmitState.Error(e.message ?: "Dispatch failed")
+            }
+        }
+    }
+
+    private fun submitYellowCase1(invoice: InvoiceDto) {
+        val items = _invoiceItems.value
+        if (items.isEmpty()) {
+            _submitState.value = SubmitState.Error("No items found on invoice")
+            return
+        }
+        _submitState.value = SubmitState.Loading
+        viewModelScope.launch {
+            val result = repository.submitYellowCase1Dispatch(
+                invoiceId = invoice.id,
+                invoiceNumber = invoice.invoiceNumber,
+                customerName = invoice.customerName,
+                items = items,
+                workerId = WorkerIdentityStore.workerId,
+                isOnline = isOnline,
+            )
+            result.onSuccess {
+                Log.d(TAG, "Case1 dispatch success for ${invoice.invoiceNumber}")
+                _submitState.value = SubmitState.Success("Invoice ${invoice.invoiceNumber} dispatched")
+                reset()
+                loadInvoices()
+            }
+            result.onFailure { e ->
+                Log.e(TAG, "Case1 dispatch failed: ${e.message}", e)
                 _submitState.value = SubmitState.Error(e.message ?: "Dispatch failed")
             }
         }

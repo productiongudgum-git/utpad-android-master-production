@@ -592,8 +592,6 @@ fun DispatchScreen(
                 DispatchScreenState.YellowConfirm -> {
                     YellowConfirmContent(
                         invoice = selectedInvoice,
-                        multiFifoLoading = multiFifoLoading,
-                        multiFifoAllocations = multiFifoAllocations,
                         submitState = submitState,
                         allowedRoutes = allowedRoutes,
                         onNavigateToRoute = onNavigateToRoute,
@@ -617,8 +615,6 @@ fun DispatchScreen(
 @Composable
 private fun YellowConfirmContent(
     invoice: com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto?,
-    multiFifoLoading: Boolean,
-    multiFifoAllocations: List<FifoAllocationResult>,
     submitState: SubmitState,
     allowedRoutes: Set<String>,
     onNavigateToRoute: (String) -> Unit,
@@ -736,30 +732,6 @@ private fun YellowConfirmContent(
                             }
                     }
 
-                    // Stock warning if any flavor is insufficient (computed silently)
-                    if (!multiFifoLoading && multiFifoAllocations.any { !it.isSufficient }) {
-                        HorizontalDivider(color = UtpadOutline)
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = UtpadError.copy(alpha = 0.08f),
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text(
-                                    text = "Stock warning — some flavors will be skipped:",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = UtpadError,
-                                )
-                                multiFifoAllocations.filter { !it.isSufficient }.forEach { r ->
-                                    Text(
-                                        text = "• ${r.flavorName}: need ${r.boxesNeeded}, have ${r.availableBoxes}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = UtpadError,
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -776,9 +748,7 @@ private fun YellowConfirmContent(
             Column(modifier = Modifier.padding(24.dp)) {
                 Button(
                     onClick = onConfirm,
-                    enabled = !multiFifoLoading
-                        && submitState !is SubmitState.Loading
-                        && multiFifoAllocations.any { it.isSufficient },
+                    enabled = submitState !is SubmitState.Loading,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
@@ -789,7 +759,7 @@ private fun YellowConfirmContent(
                     ),
                 ) {
                     when {
-                        multiFifoLoading || submitState is SubmitState.Loading -> {
+                        submitState is SubmitState.Loading -> {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
                                 strokeWidth = 2.dp,

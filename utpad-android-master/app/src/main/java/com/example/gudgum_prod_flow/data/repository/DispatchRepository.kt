@@ -7,6 +7,7 @@ import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
 import com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.GgCustomerDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
+import com.example.gudgum_prod_flow.data.remote.dto.InvoiceItemDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceItemJson
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchFifoDto
 import com.example.gudgum_prod_flow.data.remote.dto.UpdateInvoiceStatusRequest
@@ -303,6 +304,106 @@ class DispatchRepository @Inject constructor(
                             put("is_packed", isPacked)
                             put("is_dispatched", isDispatched)
                             put("dispatch_date", dispatchDate)
+                        }.toString(),
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Case 1 yellow dispatch: invoice was never dispatched before.
+     * Computes FIFO internally and inserts dispatch_events for all flavors, then
+     * sets is_dispatched=true on the invoice. No pre-computed allocations needed.
+     */
+    suspend fun submitYellowCase1Dispatch(
+        invoiceId: String,
+        invoiceNumber: String,
+        customerName: String,
+        items: List<InvoiceItemDto>,
+        workerId: String,
+        isOnline: Boolean,
+    ): Result<Unit> = runCatching {
+        withContext(Dispatchers.IO) {
+            if (isOnline) {
+                val dispatchDate = java.time.LocalDate.now().toString()
+                val now = java.time.Instant.now().toString()
+                val updatedItems = mutableListOf<InvoiceItemJson>()
+
+                for (item in items) {
+                    val inventory = getInventoryByFlavor(item.flavorId).getOrElse { emptyList() }
+                    var remaining = item.resolvedBoxes
+                    for (batch in inventory) {
+                        if (remaining <= 0) break
+                        val take = minOf(remaining, batch.expectedBoxes)
+                        val request = SubmitDispatchEventRequest(
+                            batchCode = batch.batchCode,
+                            skuId = item.flavorId,
+                            boxesDispatched = take,
+                            customerName = customerName,
+                            invoiceNumber = invoiceNumber,
+                            dispatchDate = dispatchDate,
+                            workerId = workerId,
+                            invoiceId = invoiceId,
+                            unitsDispatched = take * 15,
+                            flavorId = item.flavorId,
+                            isPacked = true,
+                            isDispatched = true,
+                        )
+                        val response = api.insertDispatchEvent(request)
+                        val code = response.code()
+                        if (code !in 200..204) {
+                            val errBody = response.errorBody()?.string() ?: ""
+                            Log.e(TAG, "Case1 insertDispatchEvent failed [$code] ${batch.batchCode}: $errBody")
+                            error("Failed to record dispatch for ${batch.batchCode}: HTTP $code")
+                        }
+                        Log.d(TAG, "Case1 dispatch [$code] ${batch.batchCode} ${take}boxes flavor=${item.flavorId}")
+                        remaining -= take
+                    }
+                    updatedItems.add(
+                        InvoiceItemJson(
+                            flavorId = item.flavorId,
+                            flavorName = item.flavor?.name ?: "Unknown",
+                            quantityUnits = item.quantityUnits,
+                            quantityBoxes = item.quantityBoxes,
+                            dispatched = true,
+                        )
+                    )
+                }
+
+                try {
+                    api.updateInvoiceStatus(
+                        invoiceId = "eq.$invoiceId",
+                        body = UpdateInvoiceStatusRequest(
+                            isPacked = true,
+                            isDispatched = true,
+                            dispatchedAt = now,
+                            items = updatedItems,
+                        ),
+                    )
+                    Log.d(TAG, "Case1 invoice update success for $invoiceId")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Case1 updateInvoiceStatus non-fatal: ${e.message}")
+                }
+            } else {
+                val totalBoxes = items.sumOf { it.resolvedBoxes }
+                pendingDao.insertEvent(
+                    PendingOperationEventEntity(
+                        module = "dispatch",
+                        workerId = workerId,
+                        workerName = WorkerIdentityStore.workerName,
+                        workerRole = WorkerIdentityStore.workerRole,
+                        batchCode = "",
+                        quantity = totalBoxes.toDouble(),
+                        unit = "boxes",
+                        summary = "Yellow dispatch queued — $totalBoxes boxes for $invoiceNumber",
+                        payloadJson = JSONObject().apply {
+                            put("invoice_id", invoiceId)
+                            put("invoice_number", invoiceNumber)
+                            put("customer_name", customerName)
+                            put("total_boxes", totalBoxes)
+                            put("is_packed", true)
+                            put("is_dispatched", true)
                         }.toString(),
                     )
                 )
