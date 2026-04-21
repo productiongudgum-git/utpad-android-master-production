@@ -178,6 +178,7 @@ data class InvoiceItemJson(
     @SerialName("flavor_name") val flavorName: String = "Unknown",
     @SerialName("quantity_units") val quantityUnits: Int = 0,
     @SerialName("quantity_boxes") val quantityBoxes: Int? = null,
+    @SerialName("dispatched") val dispatched: Boolean = false,
 )
 
 @Serializable
@@ -295,13 +296,14 @@ data class FifoAllocationLine(
     @SerialName("boxes_to_take") val boxesToTake: Int,
 )
 
-/** PATCH body for updating invoice packed/dispatched status */
+/** PATCH body for updating invoice packed/dispatched status and optional items jsonb */
 @Serializable
 data class UpdateInvoiceStatusRequest(
     @SerialName("is_packed") val isPacked: Boolean? = null,
     @SerialName("is_dispatched") val isDispatched: Boolean? = null,
     @SerialName("packed_at") val packedAt: String? = null,
     @SerialName("dispatched_at") val dispatchedAt: String? = null,
+    @SerialName("items") val items: List<InvoiceItemJson>? = null,
 )
 
 /** PATCH body for updating available units in inventory_finished_goods */

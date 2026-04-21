@@ -10,8 +10,12 @@ import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchFifoDto
 import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
 import com.example.gudgum_prod_flow.data.repository.DispatchRepository
 import com.example.gudgum_prod_flow.data.repository.FifoAllocation
+import com.example.gudgum_prod_flow.data.repository.FifoAllocationResult
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,19 +29,9 @@ import javax.inject.Inject
 sealed class DispatchScreenState {
     /** Default: 2-column kanban overview of all undispatched invoices. */
     object Overview : DispatchScreenState()
-    /** Full 5-step wizard for a not-yet-packed (red) invoice. */
-    object RedWizard : DispatchScreenState()
-    /** Simple confirmation screen for a packed-but-not-dispatched (yellow) invoice. */
-    data class YellowConfirm(val invoice: InvoiceDto) : DispatchScreenState()
+    /** 2-step FIFO wizard — used for both red and yellow invoices. */
+    object FifoWizard : DispatchScreenState()
 }
-
-/** A display-friendly FIFO allocation row */
-data class FifoDisplayLine(
-    val inventoryId: String,
-    val batchCode: String,
-    val availableUnits: Int,
-    val unitsToTake: Int,
-)
 
 @HiltViewModel
 class DispatchViewModel @Inject constructor(
@@ -51,17 +45,14 @@ class DispatchViewModel @Inject constructor(
     private val _screenState = MutableStateFlow<DispatchScreenState>(DispatchScreenState.Overview)
     val screenState: StateFlow<DispatchScreenState> = _screenState.asStateFlow()
 
-    // ── Overview: red (not packed) and yellow (packed, not dispatched) ──
+    // ── Overview lists ─────────────────────────────────────────────
     private val _redInvoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
     val redInvoices: StateFlow<List<InvoiceDto>> = _redInvoices.asStateFlow()
 
     private val _yellowInvoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
     val yellowInvoices: StateFlow<List<InvoiceDto>> = _yellowInvoices.asStateFlow()
 
-    private val _yellowDispatchLoading = MutableStateFlow(false)
-    val yellowDispatchLoading: StateFlow<Boolean> = _yellowDispatchLoading.asStateFlow()
-
-    // ── Step 1: Invoice selection ──────────────────────────────────
+    // ── Invoice / items ────────────────────────────────────────────
     private val _invoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
     val invoices: StateFlow<List<InvoiceDto>> = _invoices.asStateFlow()
 
@@ -71,27 +62,17 @@ class DispatchViewModel @Inject constructor(
     private val _selectedInvoice = MutableStateFlow<InvoiceDto?>(null)
     val selectedInvoice: StateFlow<InvoiceDto?> = _selectedInvoice.asStateFlow()
 
-    // ── Step 2: Invoice items (auto-populated) ─────────────────────
     private val _invoiceItems = MutableStateFlow<List<InvoiceItemDto>>(emptyList())
     val invoiceItems: StateFlow<List<InvoiceItemDto>> = _invoiceItems.asStateFlow()
 
-    // ── Step 3: Flavour selection ──────────────────────────────────
-    private val _selectedItem = MutableStateFlow<InvoiceItemDto?>(null)
-    val selectedItem: StateFlow<InvoiceItemDto?> = _selectedItem.asStateFlow()
+    // ── Multi-flavor FIFO allocation (Step 1 of wizard) ───────────
+    private val _multiFifoAllocations = MutableStateFlow<List<FifoAllocationResult>>(emptyList())
+    val multiFifoAllocations: StateFlow<List<FifoAllocationResult>> = _multiFifoAllocations.asStateFlow()
 
-    // ── Step 4: Boxes + FIFO allocation ────────────────────────────
-    private val _boxesToDispatch = MutableStateFlow("")
-    val boxesToDispatch: StateFlow<String> = _boxesToDispatch.asStateFlow()
+    private val _multiFifoLoading = MutableStateFlow(false)
+    val multiFifoLoading: StateFlow<Boolean> = _multiFifoLoading.asStateFlow()
 
-    private val _fifoLines = MutableStateFlow<List<FifoDisplayLine>>(emptyList())
-    val fifoLines: StateFlow<List<FifoDisplayLine>> = _fifoLines.asStateFlow()
-
-    private val _inventoryForFlavor = MutableStateFlow<List<ProductionBatchFifoDto>>(emptyList())
-
-    private val _fifoError = MutableStateFlow<String?>(null)
-    val fifoError: StateFlow<String?> = _fifoError.asStateFlow()
-
-    // ── Step 5: Confirm ────────────────────────────────────────────
+    // ── Step 2: Confirm ────────────────────────────────────────────
     private val _isPacked = MutableStateFlow(false)
     val isPacked: StateFlow<Boolean> = _isPacked.asStateFlow()
 
@@ -103,22 +84,11 @@ class DispatchViewModel @Inject constructor(
     )
     val dispatchDate: StateFlow<String> = _dispatchDate.asStateFlow()
 
-    // ── Pre-packed detection — skip steps 2-4 ─────────────────────
+    /** True when a yellow (already-packed) invoice is open — pre-ticks isPacked. */
     private val _invoiceAlreadyPacked = MutableStateFlow(false)
     val invoiceAlreadyPacked: StateFlow<Boolean> = _invoiceAlreadyPacked.asStateFlow()
 
     private val _alreadyDispatchedPerFlavor = MutableStateFlow<Map<String, Int>>(emptyMap())
-
-    // ── Stock availability check before Step 5 submit ─────────────
-    private val _stockCheckError = MutableStateFlow<String?>(null)
-    val stockCheckError: StateFlow<String?> = _stockCheckError.asStateFlow()
-
-    private val _stockCheckLoading = MutableStateFlow(false)
-    val stockCheckLoading: StateFlow<Boolean> = _stockCheckLoading.asStateFlow()
-
-    // ── Tracking table: all invoices for status view ───────────────
-    private val _allInvoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
-    val allInvoices: StateFlow<List<InvoiceDto>> = _allInvoices.asStateFlow()
 
     // ── Common ─────────────────────────────────────────────────────
     private val _submitState = MutableStateFlow<SubmitState>(SubmitState.Idle)
@@ -127,11 +97,13 @@ class DispatchViewModel @Inject constructor(
     private val _currentWizardStep = MutableStateFlow(1)
     val currentWizardStep: StateFlow<Int> = _currentWizardStep.asStateFlow()
 
+    private val _allInvoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
+    val allInvoices: StateFlow<List<InvoiceDto>> = _allInvoices.asStateFlow()
+
     private var isOnline: Boolean = true
 
     init {
         loadInvoices()
-
         realtimeManager.connect()
         viewModelScope.launch {
             realtimeManager.tableChanged.collect { table ->
@@ -147,8 +119,7 @@ class DispatchViewModel @Inject constructor(
     fun loadInvoices() {
         viewModelScope.launch {
             _invoicesLoading.value = true
-            val result = repository.getActiveInvoices()
-            result.onSuccess { list ->
+            repository.getActiveInvoices().onSuccess { list ->
                 _invoices.value = list
                 _allInvoices.value = list
                 _redInvoices.value = list.filter { !it.isPacked }
@@ -160,68 +131,40 @@ class DispatchViewModel @Inject constructor(
 
     // ── Screen navigation ──────────────────────────────────────────
 
-    /** Tap a red (not-packed) card: pre-select invoice and enter the 5-step wizard. */
+    /** Tap a red (not-packed) card: load FIFO for ALL flavors, enter wizard. */
     fun openRedWizard(invoice: InvoiceDto) {
-        onInvoiceSelected(invoice)
+        _invoiceAlreadyPacked.value = false
+        _isPacked.value = false
+        _isDispatched.value = false
+        prepareInvoice(invoice)
         _currentWizardStep.value = 1
-        _screenState.value = DispatchScreenState.RedWizard
+        _screenState.value = DispatchScreenState.FifoWizard
+        loadMultiFifoForInvoice(isYellowFlow = false)
     }
 
-    /** Tap a yellow (packed) card: show the simple confirmation screen. */
-    fun openYellowConfirm(invoice: InvoiceDto) {
-        _screenState.value = DispatchScreenState.YellowConfirm(invoice)
+    /** Tap a yellow (packed) card: load FIFO for UNDISPATCHED flavors only, enter wizard. */
+    fun openYellowWizard(invoice: InvoiceDto) {
+        _invoiceAlreadyPacked.value = true
+        _isPacked.value = true
+        _isDispatched.value = false
+        prepareInvoice(invoice)
+        _currentWizardStep.value = 1
+        _screenState.value = DispatchScreenState.FifoWizard
+        loadMultiFifoForInvoice(isYellowFlow = true)
     }
 
     /** Navigate back to the 2-column overview and clear wizard state. */
     fun backToOverview() {
         _screenState.value = DispatchScreenState.Overview
-        _selectedInvoice.value = null
-        _invoiceItems.value = emptyList()
-        _selectedItem.value = null
-        _boxesToDispatch.value = ""
-        _fifoLines.value = emptyList()
-        _fifoError.value = null
-        _inventoryForFlavor.value = emptyList()
-        _isPacked.value = false
-        _isDispatched.value = false
-        _currentWizardStep.value = 1
-        _invoiceAlreadyPacked.value = false
-        _stockCheckError.value = null
-        _stockCheckLoading.value = false
+        reset()
     }
 
-    /** Confirm dispatch for a yellow (already-packed) invoice — sets is_dispatched=true. */
-    fun confirmYellowDispatch(invoice: InvoiceDto) {
-        if (_yellowDispatchLoading.value) return
-        _yellowDispatchLoading.value = true
-        viewModelScope.launch {
-            val result = repository.updateInvoiceStatus(
-                invoiceId = invoice.id,
-                isDispatched = true,
-            )
-            result.onSuccess {
-                Log.d(TAG, "confirmYellowDispatch success for ${invoice.invoiceNumber}")
-                loadInvoices()
-                _screenState.value = DispatchScreenState.Overview
-            }
-            result.onFailure { e ->
-                Log.e(TAG, "confirmYellowDispatch failed: ${e.message}", e)
-                _submitState.value = SubmitState.Error(e.message ?: "Dispatch failed")
-            }
-            _yellowDispatchLoading.value = false
-        }
-    }
+    // ── Invoice preparation ────────────────────────────────────────
 
-    // ── Step 1 ─────────────────────────────────────────────────────
-
-    fun onInvoiceSelected(invoice: InvoiceDto) {
+    private fun prepareInvoice(invoice: InvoiceDto) {
         _selectedInvoice.value = invoice
-        _selectedItem.value = null
-        _fifoLines.value = emptyList()
-        _boxesToDispatch.value = ""
-        _stockCheckError.value = null
-
-        // Merge duplicate flavors by summing their boxes before building item list
+        _multiFifoAllocations.value = emptyList()
+        _alreadyDispatchedPerFlavor.value = emptyMap()
         _invoiceItems.value = invoice.items
             .groupBy { it.flavorId }
             .map { (flavorId, group) ->
@@ -231,94 +174,87 @@ class DispatchViewModel @Inject constructor(
                     flavorId = flavorId,
                     quantityUnits = group.sumOf { it.quantityUnits },
                     quantityBoxes = group.mapNotNull { it.quantityBoxes }.takeIf { it.isNotEmpty() }?.sum(),
-                    flavor = FlavorJoinDto(
-                        id = flavorId,
-                        name = group.first().flavorName,
-                        code = "",
-                    ),
+                    flavor = FlavorJoinDto(id = flavorId, name = group.first().flavorName, code = ""),
                 )
             }
+    }
 
-        // If already packed, pre-tick the checkbox so Step 5 validation passes
-        _invoiceAlreadyPacked.value = invoice.isPacked
-        _isPacked.value = invoice.isPacked
+    // ── Multi-flavor FIFO loading ──────────────────────────────────
 
-        // Fetch already-dispatched boxes per flavor so delta can be computed in onItemSelected()
-        _alreadyDispatchedPerFlavor.value = emptyMap()
+    private fun loadMultiFifoForInvoice(isYellowFlow: Boolean) {
+        val invoice = _selectedInvoice.value ?: return
+        val items = _invoiceItems.value
+        if (items.isEmpty()) return
+
+        _multiFifoLoading.value = true
         viewModelScope.launch {
-            repository.getAlreadyDispatchedPerFlavor(invoice.id)
-                .onSuccess { map -> _alreadyDispatchedPerFlavor.value = map }
-                .onFailure { Log.w(TAG, "getAlreadyDispatchedPerFlavor failed: ${it.message}") }
-        }
-    }
+            // Fetch already-dispatched per flavor for this invoice
+            val alreadyDispatchedMap = repository.getAlreadyDispatchedPerFlavor(invoice.id)
+                .getOrElse { emptyMap() }
+            _alreadyDispatchedPerFlavor.value = alreadyDispatchedMap
 
-    // ── Step 3 ─────────────────────────────────────────────────────
+            // For yellow flow: skip flavors already marked dispatched in items jsonb,
+            // or where all boxes have been dispatched via dispatch_events
+            val itemsToProcess = if (isYellowFlow) {
+                items.filter { item ->
+                    val jsonDispatched = invoice.items
+                        .firstOrNull { it.flavorId == item.flavorId }?.dispatched ?: false
+                    val alreadyDispatched = alreadyDispatchedMap[item.flavorId] ?: 0
+                    !jsonDispatched && alreadyDispatched < item.resolvedBoxes
+                }
+            } else items
 
-    fun onItemSelected(item: InvoiceItemDto) {
-        _selectedItem.value = item
-        _fifoLines.value = emptyList()
-
-        // Only allocate FIFO for the delta (new boxes beyond what's already dispatched)
-        val alreadyDispatched = _alreadyDispatchedPerFlavor.value[item.flavorId] ?: 0
-        val delta = maxOf(0, item.resolvedBoxes - alreadyDispatched)
-        _boxesToDispatch.value = delta.toString()
-
-        viewModelScope.launch {
-            val result = repository.getInventoryByFlavor(item.flavorId)
-            result.onSuccess { inventory ->
-                _inventoryForFlavor.value = inventory
-                computeFifo()
+            if (itemsToProcess.isEmpty()) {
+                _multiFifoAllocations.value = emptyList()
+                _multiFifoLoading.value = false
+                return@launch
             }
-            result.onFailure {
-                _inventoryForFlavor.value = emptyList()
-                _fifoError.value = "Could not load inventory for this flavour"
+
+            // Load FIFO for all flavors concurrently
+            val results = try {
+                coroutineScope {
+                    itemsToProcess.map { item ->
+                        async {
+                            val alreadyDispatched = alreadyDispatchedMap[item.flavorId] ?: 0
+                            val delta = maxOf(0, item.resolvedBoxes - alreadyDispatched)
+                            val inventory = repository.getInventoryByFlavor(item.flavorId)
+                                .getOrElse { emptyList() }
+                            val totalAvailable = inventory.sumOf { it.expectedBoxes }
+                            FifoAllocationResult(
+                                flavorId = item.flavorId,
+                                flavorName = item.flavor?.name ?: item.flavorId,
+                                boxesNeeded = delta,
+                                availableBoxes = totalAvailable,
+                                allocations = computeFifoFor(delta, inventory),
+                            )
+                        }
+                    }.awaitAll()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "loadMultiFifoForInvoice failed: ${e.message}", e)
+                emptyList()
             }
+
+            _multiFifoAllocations.value = results
+            _multiFifoLoading.value = false
+            Log.d(TAG, "Loaded FIFO for ${results.size} flavors — " +
+                results.joinToString { "${it.flavorName}:${it.availableBoxes}/${it.boxesNeeded}" })
         }
     }
 
-    // ── Step 4 ─────────────────────────────────────────────────────
-
-    fun onBoxesChanged(value: String) {
-        _boxesToDispatch.value = value
-        computeFifo()
-    }
-
-    /** FIFO allocation: sort batches by oldest packing session_date ASC, allocate from available boxes. */
-    private fun computeFifo() {
-        val needed = _boxesToDispatch.value.toIntOrNull() ?: 0
-        if (needed <= 0) {
-            _fifoLines.value = emptyList()
-            _fifoError.value = null
-            return
-        }
-
-        val inventory = _inventoryForFlavor.value.sortedBy { it.productionDate }
-        val lines = mutableListOf<FifoDisplayLine>()
+    private fun computeFifoFor(needed: Int, inventory: List<ProductionBatchFifoDto>): List<FifoAllocation> {
+        val lines = mutableListOf<FifoAllocation>()
         var remaining = needed
-
-        for (item in inventory) {
+        for (item in inventory.sortedBy { it.productionDate }) {
             if (remaining <= 0) break
             val take = minOf(remaining, item.expectedBoxes)
-            lines.add(
-                FifoDisplayLine(
-                    inventoryId = item.id,
-                    batchCode = item.batchCode,
-                    availableUnits = item.expectedBoxes,
-                    unitsToTake = take,
-                )
-            )
+            lines.add(FifoAllocation(item.id, item.batchCode, item.expectedBoxes, take))
             remaining -= take
         }
-
-        _fifoLines.value = lines
-        _fifoError.value = if (remaining > 0) {
-            "Insufficient stock! Short by $remaining boxes."
-        } else {
-            null
-        }
+        return lines
     }
 
-    // ── Step 5 ─────────────────────────────────────────────────────
+    // ── Step 2: Confirm toggles ────────────────────────────────────
 
     fun onPackedToggle(value: Boolean) {
         _isPacked.value = value
@@ -327,60 +263,14 @@ class DispatchViewModel @Inject constructor(
     fun onDispatchedToggle(value: Boolean) { _isDispatched.value = value }
     fun onDispatchDateChanged(value: String) { _dispatchDate.value = value }
 
-    /** Checks total available stock vs total required boxes for all items in the invoice. */
-    private fun checkStockForInvoice() {
-        val items = _invoiceItems.value
-        if (items.isEmpty()) {
-            _stockCheckError.value = null
-            return
-        }
-        _stockCheckLoading.value = true
-        _stockCheckError.value = null
-        viewModelScope.launch {
-            var totalRequired = 0
-            var totalAvailable = 0
-            var fetchFailed = false
-            for (item in items) {
-                val alreadyDispatched = _alreadyDispatchedPerFlavor.value[item.flavorId] ?: 0
-                totalRequired += maxOf(0, item.resolvedBoxes - alreadyDispatched)
-                repository.getInventoryByFlavor(item.flavorId)
-                    .onSuccess { inventory -> totalAvailable += inventory.sumOf { it.expectedBoxes } }
-                    .onFailure { fetchFailed = true }
-            }
-            _stockCheckLoading.value = false
-            _stockCheckError.value = when {
-                fetchFailed -> "Could not verify stock availability. Please go back and try again."
-                totalAvailable < totalRequired ->
-                    "Insufficient stock. Required: $totalRequired boxes, Available: $totalAvailable boxes. Cannot dispatch until stock is available."
-                else -> null
-            }
-        }
-    }
-
     // ── Navigation ─────────────────────────────────────────────────
 
     fun nextStep() {
-        val step = _currentWizardStep.value
-        when {
-            // Invoice already packed — jump from Step 1 directly to Step 5
-            step == 1 && _invoiceAlreadyPacked.value -> {
-                _currentWizardStep.value = 5
-            }
-            step < 5 -> {
-                _currentWizardStep.value = step + 1
-                // Trigger stock check only for the normal (unpacked) FIFO flow
-                if (step + 1 == 5 && !_invoiceAlreadyPacked.value) checkStockForInvoice()
-            }
-        }
+        if (_currentWizardStep.value < 2) _currentWizardStep.value = 2
     }
 
     fun previousStep() {
-        val step = _currentWizardStep.value
-        when {
-            // Pre-packed invoice — Back from Step 5 returns to Step 1
-            step == 5 && _invoiceAlreadyPacked.value -> _currentWizardStep.value = 1
-            step > 1 -> _currentWizardStep.value = step - 1
-        }
+        if (_currentWizardStep.value > 1) _currentWizardStep.value = 1
     }
 
     // ── Submit ─────────────────────────────────────────────────────
@@ -390,128 +280,83 @@ class DispatchViewModel @Inject constructor(
 
         val invoice = _selectedInvoice.value
         if (invoice == null) {
-            Log.d(TAG, "submit() blocked: no invoice selected")
-            _submitState.value = SubmitState.Error("Select an invoice")
+            _submitState.value = SubmitState.Error("No invoice selected")
             return
         }
         if (!_isPacked.value) {
-            Log.d(TAG, "submit() blocked: isPacked checkbox is false for invoice ${invoice.invoiceNumber}")
-            _submitState.value = SubmitState.Error("This invoice has not been packed yet. Please mark it as packed before dispatching.")
-            return
-        }
-        if (!_invoiceAlreadyPacked.value) {
-            val stockErr = _stockCheckError.value
-            if (stockErr != null) {
-                Log.d(TAG, "submit() blocked: stockCheckError = $stockErr")
-                _submitState.value = SubmitState.Error(stockErr)
-                return
-            }
-        }
-
-        // Pre-packed path — steps 2-4 were skipped, just update dispatch status
-        if (_invoiceAlreadyPacked.value) {
-            Log.d(TAG, "submit() pre-packed path — invoice=${invoice.invoiceNumber}, isDispatched=${_isDispatched.value}")
-            _submitState.value = SubmitState.Loading
-            viewModelScope.launch {
-                val result = repository.updateInvoiceStatus(
-                    invoiceId = invoice.id,
-                    isPacked = true,
-                    isDispatched = _isDispatched.value,
-                )
-                result.onSuccess {
-                    Log.d(TAG, "submit() pre-packed success for ${invoice.invoiceNumber}")
-                    _submitState.value = SubmitState.Success("Invoice ${invoice.invoiceNumber} dispatched")
-                    reset()
-                    loadInvoices()
-                }
-                result.onFailure { e ->
-                    Log.e(TAG, "submit() pre-packed failed — ${e::class.simpleName}: ${e.message}", e)
-                    _submitState.value = SubmitState.Error(e.message ?: "Dispatch failed")
-                }
-            }
+            _submitState.value = SubmitState.Error("Mark invoice as packed before dispatching")
             return
         }
 
-        // Normal FIFO path
-        val item = _selectedItem.value
-        if (item == null) {
-            Log.d(TAG, "submit() blocked: no flavour selected")
-            _submitState.value = SubmitState.Error("Select a flavour")
-            return
-        }
-        val lines = _fifoLines.value
-        if (lines.isEmpty()) {
-            Log.d(TAG, "submit() blocked: fifoLines is empty — inventory may not have loaded yet")
-            _submitState.value = SubmitState.Error("No FIFO allocation computed")
-            return
-        }
-        if (_fifoError.value != null) {
-            Log.d(TAG, "submit() blocked: fifoError = ${_fifoError.value}")
-            _submitState.value = SubmitState.Error(_fifoError.value!!)
-            return
-        }
+        val allAllocations = _multiFifoAllocations.value
+        val sufficientAllocations = allAllocations.filter { it.isSufficient }
 
-        Log.d(TAG, "submit() starting — invoice=${invoice.invoiceNumber}, flavour=${item.flavorId}, " +
-                "boxes=${_boxesToDispatch.value}, lines=${lines.size}, " +
-                "isPacked=${_isPacked.value}, isDispatched=${_isDispatched.value}, " +
-                "workerId=${WorkerIdentityStore.workerId}, online=$isOnline")
+        if (sufficientAllocations.isEmpty()) {
+            _submitState.value = SubmitState.Error("No flavors have sufficient stock to dispatch")
+            return
+        }
 
         _submitState.value = SubmitState.Loading
         viewModelScope.launch {
-            val allocations = lines.map { line ->
-                FifoAllocation(
-                    inventoryId = line.inventoryId,
-                    batchCode = line.batchCode,
-                    availableUnits = line.availableUnits,
-                    unitsToTake = line.unitsToTake,
-                )
+            // Mark dispatched=true in items jsonb for each successfully dispatched flavor
+            val dispatchedFlavorIds = sufficientAllocations.map { it.flavorId }.toSet()
+            val updatedItems = invoice.items.map { item ->
+                if (item.flavorId in dispatchedFlavorIds) item.copy(dispatched = true) else item
             }
-            Log.d(TAG, "submit() allocations: ${allocations.map { "${it.batchCode}=${it.unitsToTake}boxes" }}")
 
-            val result = repository.submitFifoDispatch(
+            // All flavors dispatched → full dispatch; some insufficient → partial (stays yellow)
+            val allFlavorsDispatched = allAllocations.all { it.isSufficient }
+            val finalIsDispatched = _isDispatched.value && allFlavorsDispatched
+            val finalIsPacked = _isPacked.value || allFlavorsDispatched
+
+            Log.d(TAG, "submit() invoice=${invoice.invoiceNumber} " +
+                "sufficient=${sufficientAllocations.size}/${allAllocations.size} " +
+                "finalDispatched=$finalIsDispatched online=$isOnline")
+
+            val result = repository.submitMultipleFlavorsDispatch(
                 invoiceId = invoice.id,
                 invoiceNumber = invoice.invoiceNumber,
                 customerName = invoice.customerName,
-                flavorId = item.flavorId,
-                allocations = allocations,
-                isPacked = _isPacked.value,
-                isDispatched = _isDispatched.value,
+                allocations = sufficientAllocations,
+                isPacked = finalIsPacked,
+                isDispatched = finalIsDispatched,
                 dispatchDate = _dispatchDate.value,
                 workerId = WorkerIdentityStore.workerId,
                 isOnline = isOnline,
+                updatedItems = updatedItems,
             )
 
             result.onSuccess {
-                val totalBoxes = lines.sumOf { it.unitsToTake }
-                Log.d(TAG, "submit() success — $totalBoxes boxes dispatched for ${invoice.invoiceNumber}")
-                _submitState.value = SubmitState.Success(
-                    if (isOnline) "Dispatched $totalBoxes boxes for invoice ${invoice.invoiceNumber}"
-                    else "Dispatch saved offline — will sync when connected"
-                )
+                val totalBoxes = sufficientAllocations.sumOf { r -> r.allocations.sumOf { it.unitsToTake } }
+                val msg = when {
+                    !isOnline -> "Dispatch saved offline — will sync when connected"
+                    allFlavorsDispatched -> "All $totalBoxes boxes dispatched for ${invoice.invoiceNumber}"
+                    else -> "$totalBoxes boxes dispatched (partial) — ${allAllocations.size - sufficientAllocations.size} flavor(s) pending stock"
+                }
+                Log.d(TAG, "submit() success: $msg")
+                _submitState.value = SubmitState.Success(msg)
                 reset()
                 loadInvoices()
             }
             result.onFailure { e ->
-                Log.e(TAG, "submit() failed — ${e::class.simpleName}: ${e.message}", e)
+                Log.e(TAG, "submit() failed: ${e.message}", e)
                 _submitState.value = SubmitState.Error(e.message ?: "Dispatch failed")
             }
         }
     }
 
-    // ── Tracking: toggle packed/dispatched from the table ──────────
+    // ── Tracking: toggle from summary table ────────────────────────
 
     fun toggleInvoicePacked(invoice: InvoiceDto) {
         viewModelScope.launch {
-            val newValue = !invoice.isPacked
-            repository.updateInvoiceStatus(invoice.id, isPacked = newValue)
+            repository.updateInvoiceStatus(invoice.id, isPacked = !invoice.isPacked)
             loadInvoices()
         }
     }
 
     fun toggleInvoiceDispatched(invoice: InvoiceDto) {
         viewModelScope.launch {
-            val newValue = !invoice.isDispatched
-            repository.updateInvoiceStatus(invoice.id, isDispatched = newValue)
+            repository.updateInvoiceStatus(invoice.id, isDispatched = !invoice.isDispatched)
             loadInvoices()
         }
     }
@@ -519,11 +364,8 @@ class DispatchViewModel @Inject constructor(
     fun reset() {
         _selectedInvoice.value = null
         _invoiceItems.value = emptyList()
-        _selectedItem.value = null
-        _boxesToDispatch.value = ""
-        _fifoLines.value = emptyList()
-        _fifoError.value = null
-        _inventoryForFlavor.value = emptyList()
+        _multiFifoAllocations.value = emptyList()
+        _multiFifoLoading.value = false
         _isPacked.value = false
         _isDispatched.value = false
         _dispatchDate.value = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -531,9 +373,6 @@ class DispatchViewModel @Inject constructor(
         _currentWizardStep.value = 1
         _invoiceAlreadyPacked.value = false
         _alreadyDispatchedPerFlavor.value = emptyMap()
-        _stockCheckError.value = null
-        _stockCheckLoading.value = false
-        _screenState.value = DispatchScreenState.Overview
     }
 
     fun clearSubmitState() { _submitState.value = SubmitState.Idle }

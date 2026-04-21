@@ -1,5 +1,6 @@
 package com.example.gudgum_prod_flow.ui.screens.production
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,11 +17,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -58,12 +57,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
+import com.example.gudgum_prod_flow.data.repository.FifoAllocationResult
 import com.example.gudgum_prod_flow.ui.components.SuccessOverlay
 import com.example.gudgum_prod_flow.ui.navigation.AppRoute
 import com.example.gudgum_prod_flow.ui.theme.UtpadBackground
@@ -112,28 +111,19 @@ fun DispatchScreen(
 ) {
     val screenState by viewModel.screenState.collectAsState()
 
-    // Overview lists
     val redInvoices by viewModel.redInvoices.collectAsState()
     val yellowInvoices by viewModel.yellowInvoices.collectAsState()
     val invoicesLoading by viewModel.invoicesLoading.collectAsState()
-    val yellowDispatchLoading by viewModel.yellowDispatchLoading.collectAsState()
 
-    // Wizard state
-    val invoices by viewModel.invoices.collectAsState()
     val selectedInvoice by viewModel.selectedInvoice.collectAsState()
-    val invoiceItems by viewModel.invoiceItems.collectAsState()
-    val selectedItem by viewModel.selectedItem.collectAsState()
-    val boxesToDispatch by viewModel.boxesToDispatch.collectAsState()
-    val fifoLines by viewModel.fifoLines.collectAsState()
-    val fifoError by viewModel.fifoError.collectAsState()
+    val multiFifoAllocations by viewModel.multiFifoAllocations.collectAsState()
+    val multiFifoLoading by viewModel.multiFifoLoading.collectAsState()
     val isPacked by viewModel.isPacked.collectAsState()
     val isDispatched by viewModel.isDispatched.collectAsState()
     val dispatchDate by viewModel.dispatchDate.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
     val currentStep by viewModel.currentWizardStep.collectAsState()
     val invoiceAlreadyPacked by viewModel.invoiceAlreadyPacked.collectAsState()
-    val stockCheckError by viewModel.stockCheckError.collectAsState()
-    val stockCheckLoading by viewModel.stockCheckLoading.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -151,8 +141,7 @@ fun DispatchScreen(
                     Text(
                         text = when (screenState) {
                             DispatchScreenState.Overview -> "Dispatch"
-                            DispatchScreenState.RedWizard -> "Dispatch Wizard"
-                            is DispatchScreenState.YellowConfirm -> "Confirm Dispatch"
+                            DispatchScreenState.FifoWizard -> "Dispatch Wizard"
                         },
                         fontWeight = FontWeight.Bold,
                         color = UtpadTextPrimary,
@@ -162,11 +151,10 @@ fun DispatchScreen(
                     IconButton(onClick = {
                         when (screenState) {
                             DispatchScreenState.Overview -> onBack()
-                            DispatchScreenState.RedWizard -> {
+                            DispatchScreenState.FifoWizard -> {
                                 if (currentStep > 1) viewModel.previousStep()
                                 else viewModel.backToOverview()
                             }
-                            is DispatchScreenState.YellowConfirm -> viewModel.backToOverview()
                         }
                     }) {
                         Icon(
@@ -191,9 +179,9 @@ fun DispatchScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            when (val state = screenState) {
+            when (screenState) {
 
-                // ── Step 0: 2-column kanban overview ──────────────────────────
+                // ── 2-column kanban overview ───────────────────────────────
                 DispatchScreenState.Overview -> {
                     DispatchOverviewContent(
                         allowedRoutes = allowedRoutes,
@@ -202,12 +190,12 @@ fun DispatchScreen(
                         yellowInvoices = yellowInvoices,
                         isLoading = invoicesLoading,
                         onRedCardTap = { viewModel.openRedWizard(it) },
-                        onYellowCardTap = { viewModel.openYellowConfirm(it) },
+                        onYellowCardTap = { viewModel.openYellowWizard(it) },
                     )
                 }
 
-                // ── Steps 1-5: existing FIFO dispatch wizard ───────────────────
-                DispatchScreenState.RedWizard -> {
+                // ── 2-step FIFO wizard ─────────────────────────────────────
+                DispatchScreenState.FifoWizard -> {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -224,116 +212,17 @@ fun DispatchScreen(
 
                         WizardProgressBar(
                             currentStep = currentStep,
-                            totalSteps = 5,
+                            totalSteps = 2,
                             stepTitle = when (currentStep) {
-                                1 -> "Select Invoice"
-                                2 -> "Customer Info"
-                                3 -> "Select Flavour"
-                                4 -> "Boxes & FIFO"
-                                else -> "Confirm"
+                                1 -> "Stock Allocation"
+                                else -> "Confirm & Dispatch"
                             },
                         )
 
                         when (currentStep) {
-                            // ── Step 1: Invoice Selection ──────────────────────────
-                            1 -> {
-                                Card(
-                                    shape = RoundedCornerShape(24.dp),
-                                    colors = CardDefaults.cardColors(containerColor = UtpadSurface),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                                    ) {
-                                        Text(
-                                            text = "INVOICE",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = UtpadTextSecondary,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                        if (invoicesLoading) {
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.height(20.dp).width(20.dp),
-                                                    strokeWidth = 2.dp,
-                                                    color = UtpadPrimary,
-                                                )
-                                                Text("Loading invoices...", color = UtpadTextSecondary, style = MaterialTheme.typography.bodySmall)
-                                            }
-                                        } else if (invoices.isEmpty()) {
-                                            Text(
-                                                text = "No pending invoices found.",
-                                                color = UtpadTextSecondary,
-                                                style = MaterialTheme.typography.bodySmall,
-                                            )
-                                        } else {
-                                            LazyColumn(
-                                                modifier = Modifier.height(300.dp),
-                                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                            ) {
-                                                items(invoices) { invoice ->
-                                                    val isSelected = selectedInvoice?.id == invoice.id
-                                                    val totalBoxes = invoice.totalBoxes()
-                                                    Surface(
-                                                        onClick = { viewModel.onInvoiceSelected(invoice) },
-                                                        shape = RoundedCornerShape(16.dp),
-                                                        color = if (isSelected) UtpadPrimary.copy(alpha = 0.1f) else UtpadBackground,
-                                                        border = androidx.compose.foundation.BorderStroke(
-                                                            width = if (isSelected) 2.dp else 1.dp,
-                                                            color = if (isSelected) UtpadPrimary else UtpadOutline,
-                                                        ),
-                                                    ) {
-                                                        Row(
-                                                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                                            verticalAlignment = Alignment.CenterVertically,
-                                                        ) {
-                                                            Column(modifier = Modifier.weight(1f)) {
-                                                                Text(
-                                                                    text = invoice.invoiceNumber,
-                                                                    style = MaterialTheme.typography.bodyMedium,
-                                                                    fontWeight = FontWeight.Bold,
-                                                                    color = if (isSelected) UtpadPrimary else UtpadTextPrimary,
-                                                                )
-                                                                Text(
-                                                                    text = invoice.customerName,
-                                                                    style = MaterialTheme.typography.bodySmall,
-                                                                    color = if (isSelected) UtpadPrimary.copy(alpha = 0.7f) else UtpadTextSecondary,
-                                                                )
-                                                            }
-                                                            Column(horizontalAlignment = Alignment.End) {
-                                                                Text(
-                                                                    text = "$totalBoxes boxes",
-                                                                    style = MaterialTheme.typography.bodySmall,
-                                                                    fontWeight = FontWeight.SemiBold,
-                                                                    color = if (isSelected) UtpadPrimary else UtpadTextSecondary,
-                                                                )
-                                                                if (isSelected) {
-                                                                    Icon(
-                                                                        imageVector = Icons.Filled.CheckCircle,
-                                                                        contentDescription = null,
-                                                                        tint = UtpadPrimary,
-                                                                        modifier = Modifier.size(16.dp),
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
 
-                            // ── Step 2: Customer Info ──────────────────────────────
-                            2 -> {
+                            // ── Step 1: Multi-flavor FIFO table ───────────────
+                            1 -> {
                                 Card(
                                     shape = RoundedCornerShape(24.dp),
                                     colors = CardDefaults.cardColors(containerColor = UtpadSurface),
@@ -344,7 +233,7 @@ fun DispatchScreen(
                                         verticalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
                                         Text(
-                                            text = "CUSTOMER",
+                                            text = "INVOICE: ${selectedInvoice?.invoiceNumber ?: "—"}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = UtpadTextSecondary,
                                             fontWeight = FontWeight.SemiBold,
@@ -359,35 +248,54 @@ fun DispatchScreen(
                                         HorizontalDivider(color = UtpadOutline)
 
                                         Text(
-                                            text = "INVOICE ITEMS",
+                                            text = "FIFO STOCK ALLOCATION",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = UtpadTextSecondary,
                                             fontWeight = FontWeight.SemiBold,
                                         )
 
-                                        if (invoiceItems.isEmpty()) {
+                                        if (multiFifoLoading) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(20.dp),
+                                                    strokeWidth = 2.dp,
+                                                    color = UtpadPrimary,
+                                                )
+                                                Text(
+                                                    text = "Loading stock…",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = UtpadTextSecondary,
+                                                )
+                                            }
+                                        } else if (multiFifoAllocations.isEmpty()) {
                                             Text(
-                                                text = "Loading items...",
+                                                text = "No pending flavors to dispatch for this invoice.",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = UtpadTextSecondary,
                                             )
                                         } else {
-                                            invoiceItems.forEach { item ->
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                            multiFifoAllocations.forEach { result ->
+                                                FlavorAllocationCard(result)
+                                            }
+
+                                            // Summary banner if partial
+                                            val insufficientCount = multiFifoAllocations.count { !it.isSufficient }
+                                            if (insufficientCount > 0) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    color = UtpadWarning.copy(alpha = 0.1f),
                                                 ) {
                                                     Text(
-                                                        text = item.flavor?.name ?: item.flavorId,
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        color = UtpadTextPrimary,
+                                                        text = "$insufficientCount flavor(s) have insufficient stock. " +
+                                                            "Only flavors with sufficient stock will be dispatched. " +
+                                                            "Invoice will move to PACKED (yellow) column.",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = UtpadWarning,
                                                         fontWeight = FontWeight.SemiBold,
-                                                    )
-                                                    Text(
-                                                        text = "${item.resolvedBoxes} boxes",
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        color = UtpadPrimary,
-                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(12.dp),
                                                     )
                                                 }
                                             }
@@ -396,169 +304,8 @@ fun DispatchScreen(
                                 }
                             }
 
-                            // ── Step 3: Flavour Selection ──────────────────────────
-                            3 -> {
-                                Card(
-                                    shape = RoundedCornerShape(24.dp),
-                                    colors = CardDefaults.cardColors(containerColor = UtpadSurface),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                                    ) {
-                                        Text(
-                                            text = "SELECT FLAVOUR TO DISPATCH",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = UtpadTextSecondary,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-
-                                        invoiceItems.forEach { item ->
-                                            val isSelected = selectedItem?.id == item.id
-                                            Surface(
-                                                onClick = { viewModel.onItemSelected(item) },
-                                                shape = RoundedCornerShape(16.dp),
-                                                color = if (isSelected) UtpadPrimary.copy(alpha = 0.1f) else UtpadBackground,
-                                                border = androidx.compose.foundation.BorderStroke(
-                                                    width = if (isSelected) 2.dp else 1.dp,
-                                                    color = if (isSelected) UtpadPrimary else UtpadOutline,
-                                                ),
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .padding(16.dp),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                ) {
-                                                    Column {
-                                                        Text(
-                                                            text = item.flavor?.name ?: item.flavorId,
-                                                            style = MaterialTheme.typography.bodyLarge,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = if (isSelected) UtpadPrimary else UtpadTextPrimary,
-                                                        )
-                                                    }
-                                                    Text(
-                                                        text = "${item.resolvedBoxes} boxes",
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        color = if (isSelected) UtpadPrimary else UtpadTextSecondary,
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // ── Step 4: Units & FIFO Allocation ───────────────────
-                            4 -> {
-                                Card(
-                                    shape = RoundedCornerShape(24.dp),
-                                    colors = CardDefaults.cardColors(containerColor = UtpadSurface),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                                    ) {
-                                        Text(
-                                            text = "BOXES TO DISPATCH",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = UtpadTextSecondary,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                        OutlinedTextField(
-                                            value = boxesToDispatch,
-                                            onValueChange = viewModel::onBoxesChanged,
-                                            placeholder = { Text("0", color = UtpadTextSecondary) },
-                                            suffix = { Text("boxes", color = UtpadTextSecondary) },
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = UtpadPrimary,
-                                                unfocusedBorderColor = UtpadOutline,
-                                                focusedContainerColor = UtpadBackground,
-                                                unfocusedContainerColor = UtpadSurface,
-                                            ),
-                                            shape = RoundedCornerShape(16.dp),
-                                        )
-
-                                        if (fifoLines.isNotEmpty()) {
-                                            HorizontalDivider(color = UtpadOutline)
-                                            Text(
-                                                text = "FIFO ALLOCATION (oldest first)",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = UtpadTextSecondary,
-                                                fontWeight = FontWeight.SemiBold,
-                                            )
-
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                            ) {
-                                                Text("Batch", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(1f))
-                                                Text("Available", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
-                                                Text("Take", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
-                                            }
-
-                                            fifoLines.forEach { line ->
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .padding(vertical = 4.dp),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                ) {
-                                                    Text(
-                                                        text = line.batchCode,
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        color = UtpadTextPrimary,
-                                                        modifier = Modifier.weight(1f),
-                                                    )
-                                                    Text(
-                                                        text = "${line.availableUnits}",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = UtpadTextSecondary,
-                                                        modifier = Modifier.weight(1f),
-                                                        textAlign = TextAlign.Center,
-                                                    )
-                                                    Text(
-                                                        text = "${line.unitsToTake}",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = UtpadPrimary,
-                                                        modifier = Modifier.weight(1f),
-                                                        textAlign = TextAlign.End,
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        if (fifoError != null) {
-                                            Surface(
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = UtpadError.copy(alpha = 0.1f),
-                                            ) {
-                                                Text(
-                                                    text = fifoError!!,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = UtpadError,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    modifier = Modifier.padding(12.dp),
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // ── Step 5: Confirm & Status ───────────────────────────
-                            5 -> {
+                            // ── Step 2: Confirm & status ──────────────────────
+                            2 -> {
                                 Card(
                                     shape = RoundedCornerShape(24.dp),
                                     colors = CardDefaults.cardColors(containerColor = UtpadSurface),
@@ -585,31 +332,55 @@ fun DispatchScreen(
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = UtpadTextPrimary,
                                         )
-                                        if (invoiceAlreadyPacked) {
+
+                                        val sufficient = multiFifoAllocations.filter { it.isSufficient }
+                                        val insufficient = multiFifoAllocations.filter { !it.isSufficient }
+                                        val totalBoxes = sufficient.sumOf { r -> r.allocations.sumOf { it.unitsToTake } }
+
+                                        if (sufficient.isNotEmpty()) {
                                             Surface(
                                                 shape = RoundedCornerShape(8.dp),
-                                                color = UtpadSuccess.copy(alpha = 0.12f),
+                                                color = UtpadSuccess.copy(alpha = 0.1f),
                                             ) {
-                                                Text(
-                                                    text = "Already packed — confirm dispatch only",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = UtpadSuccess,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                                )
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                    Text(
+                                                        text = "Will dispatch: $totalBoxes boxes",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = UtpadSuccess,
+                                                    )
+                                                    sufficient.forEach { r ->
+                                                        Text(
+                                                            text = "• ${r.flavorName} — ${r.allocations.sumOf { it.unitsToTake }} boxes",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = UtpadSuccess,
+                                                        )
+                                                    }
+                                                }
                                             }
-                                        } else {
-                                            Text(
-                                                text = "Flavour: ${selectedItem?.flavor?.name ?: "—"}",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = UtpadTextPrimary,
-                                            )
-                                            Text(
-                                                text = "Boxes: $boxesToDispatch across ${fifoLines.size} batch(es)",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = UtpadPrimary,
-                                            )
+                                        }
+
+                                        if (insufficient.isNotEmpty()) {
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = UtpadError.copy(alpha = 0.08f),
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                    Text(
+                                                        text = "Will NOT dispatch (insufficient stock):",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = UtpadError,
+                                                    )
+                                                    insufficient.forEach { r ->
+                                                        Text(
+                                                            text = "• ${r.flavorName} — need ${r.boxesNeeded}, have ${r.availableBoxes}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = UtpadError,
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         HorizontalDivider(color = UtpadOutline)
@@ -680,8 +451,12 @@ fun DispatchScreen(
                                         ) {
                                             Checkbox(
                                                 checked = isPacked,
-                                                onCheckedChange = { viewModel.onPackedToggle(it) },
-                                                colors = CheckboxDefaults.colors(checkedColor = UtpadPrimary),
+                                                onCheckedChange = { if (!invoiceAlreadyPacked) viewModel.onPackedToggle(it) },
+                                                enabled = !invoiceAlreadyPacked,
+                                                colors = CheckboxDefaults.colors(
+                                                    checkedColor = UtpadPrimary,
+                                                    disabledCheckedColor = UtpadPrimary.copy(alpha = 0.5f),
+                                                ),
                                             )
                                             Column {
                                                 Text(
@@ -714,43 +489,20 @@ fun DispatchScreen(
                                                     disabledUncheckedColor = UtpadOutline,
                                                 ),
                                             )
-                                            Text(
-                                                text = "Mark Invoice as Dispatched",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = if (isPacked) UtpadTextPrimary else UtpadTextSecondary,
-                                            )
-                                        }
-
-                                        if (stockCheckLoading) {
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.height(16.dp).width(16.dp),
-                                                    strokeWidth = 2.dp,
-                                                    color = UtpadPrimary,
-                                                )
+                                            Column {
                                                 Text(
-                                                    text = "Checking stock availability…",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = UtpadTextSecondary,
-                                                )
-                                            }
-                                        }
-                                        if (stockCheckError != null) {
-                                            Surface(
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = UtpadError.copy(alpha = 0.1f),
-                                            ) {
-                                                Text(
-                                                    text = stockCheckError!!,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = UtpadError,
+                                                    text = "Mark Invoice as Dispatched",
+                                                    style = MaterialTheme.typography.bodyMedium,
                                                     fontWeight = FontWeight.SemiBold,
-                                                    modifier = Modifier.padding(12.dp),
+                                                    color = if (isPacked) UtpadTextPrimary else UtpadTextSecondary,
                                                 )
+                                                if (isPacked && multiFifoAllocations.any { !it.isSufficient }) {
+                                                    Text(
+                                                        text = "Partial — invoice will stay in yellow until all flavors are dispatched",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = UtpadWarning,
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -759,7 +511,7 @@ fun DispatchScreen(
                         }
                     }
 
-                    // Success overlay — dismisses after 2 s and resets wizard to overview.
+                    // Success overlay
                     if (submitState is SubmitState.Success) {
                         SuccessOverlay(onDismiss = {
                             viewModel.clearSubmitState()
@@ -786,7 +538,9 @@ fun DispatchScreen(
                                         if (currentStep > 1) viewModel.previousStep()
                                         else viewModel.backToOverview()
                                     },
-                                    modifier = Modifier.weight(1f).height(56.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(56.dp),
                                     shape = RoundedCornerShape(20.dp),
                                     colors = ButtonDefaults.outlinedButtonColors(
                                         contentColor = UtpadTextPrimary,
@@ -795,40 +549,133 @@ fun DispatchScreen(
                                     Text("Back", fontWeight = FontWeight.Bold)
                                 }
 
+                                val canProceed = when (currentStep) {
+                                    1 -> !multiFifoLoading && multiFifoAllocations.any { it.isSufficient }
+                                    else -> !multiFifoLoading && isPacked && submitState !is SubmitState.Loading
+                                }
+
                                 Button(
                                     onClick = {
-                                        if (currentStep < 5) viewModel.nextStep() else viewModel.submit()
+                                        if (currentStep < 2) viewModel.nextStep() else viewModel.submit()
                                     },
-                                    modifier = Modifier.weight(1f).height(56.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(56.dp),
                                     shape = RoundedCornerShape(20.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = UtpadPrimary,
                                         contentColor = Color.White,
                                     ),
-                                    enabled = submitState !is SubmitState.Loading
-                                        && !stockCheckLoading
-                                        && (currentStep < 5 || stockCheckError == null),
+                                    enabled = canProceed,
                                 ) {
-                                    Text(
-                                        if (currentStep < 5) "Continue" else "Confirm Dispatch",
-                                        fontWeight = FontWeight.Bold,
-                                    )
+                                    if (submitState is SubmitState.Loading) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.dp,
+                                            color = Color.White,
+                                        )
+                                    } else {
+                                        Text(
+                                            if (currentStep < 2) "Proceed" else "Confirm Dispatch",
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+}
 
-                // ── Yellow confirmation screen ─────────────────────────────
-                is DispatchScreenState.YellowConfirm -> {
-                    YellowConfirmContent(
-                        invoice = state.invoice,
-                        isLoading = yellowDispatchLoading,
-                        allowedRoutes = allowedRoutes,
-                        onNavigateToRoute = onNavigateToRoute,
-                        onConfirm = { viewModel.confirmYellowDispatch(state.invoice) },
-                    )
+// ── Flavor allocation card (Step 1 row) ───────────────────────────────────
+
+@Composable
+private fun FlavorAllocationCard(result: FifoAllocationResult) {
+    val borderColor = if (result.isSufficient) UtpadSuccess else UtpadError
+    val bgColor = if (result.isSufficient) UtpadSuccess.copy(alpha = 0.06f) else UtpadError.copy(alpha = 0.06f)
+    val statusLabel = if (result.isSufficient) "✅" else "⚠️"
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = bgColor,
+        border = BorderStroke(1.dp, borderColor),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "$statusLabel ${result.flavorName}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (result.isSufficient) UtpadSuccess else UtpadError,
+                )
+                Text(
+                    text = "${result.availableBoxes} avail / ${result.boxesNeeded} needed",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = UtpadTextSecondary,
+                )
+            }
+
+            if (result.isSufficient && result.allocations.isNotEmpty()) {
+                HorizontalDivider(color = borderColor.copy(alpha = 0.3f))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("Batch", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(2f))
+                    Text("Available", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                    Text("Take", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                 }
+                result.allocations.forEach { alloc ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = alloc.batchCode,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = UtpadTextPrimary,
+                            modifier = Modifier.weight(2f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "${alloc.availableUnits}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = UtpadTextSecondary,
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            text = "${alloc.unitsToTake}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = UtpadSuccess,
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.End,
+                        )
+                    }
+                }
+            } else if (!result.isSufficient) {
+                Text(
+                    text = "Short by ${result.boxesNeeded - result.availableBoxes} boxes — will be skipped",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = UtpadError,
+                )
             }
         }
     }
@@ -888,17 +735,11 @@ private fun DispatchOverviewContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item {
-                        ColumnHeader(
-                            label = "NOT PACKED",
-                            count = sortedRed.size,
-                            color = redColor,
-                        )
+                        ColumnHeader(label = "NOT PACKED", count = sortedRed.size, color = redColor)
                         Spacer(modifier = Modifier.height(4.dp))
                     }
                     if (sortedRed.isEmpty()) {
-                        item {
-                            EmptyColumnHint("All invoices packed")
-                        }
+                        item { EmptyColumnHint("All invoices packed") }
                     } else {
                         items(sortedRed, key = { it.id }) { invoice ->
                             RedInvoiceCard(invoice = invoice, onClick = { onRedCardTap(invoice) })
@@ -913,17 +754,11 @@ private fun DispatchOverviewContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item {
-                        ColumnHeader(
-                            label = "PACKED",
-                            count = sortedYellow.size,
-                            color = yellowColor,
-                        )
+                        ColumnHeader(label = "PACKED", count = sortedYellow.size, color = yellowColor)
                         Spacer(modifier = Modifier.height(4.dp))
                     }
                     if (sortedYellow.isEmpty()) {
-                        item {
-                            EmptyColumnHint("Nothing packed yet")
-                        }
+                        item { EmptyColumnHint("Nothing packed yet") }
                     } else {
                         items(sortedYellow, key = { it.id }) { invoice ->
                             YellowInvoiceCard(invoice = invoice, onClick = { onYellowCardTap(invoice) })
@@ -954,10 +789,7 @@ private fun ColumnHeader(label: String, count: Int, color: Color) {
                 fontWeight = FontWeight.Bold,
                 color = color,
             )
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = color,
-            ) {
+            Surface(shape = RoundedCornerShape(8.dp), color = color) {
                 Text(
                     text = "$count",
                     style = MaterialTheme.typography.labelSmall,
@@ -997,7 +829,7 @@ private fun RedInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
         onClick = onClick,
         shape = RoundedCornerShape(16.dp),
         color = UtpadSurface,
-        border = androidx.compose.foundation.BorderStroke(
+        border = BorderStroke(
             width = if (isOverdue) 2.dp else 1.dp,
             color = if (isOverdue) UtpadError else UtpadOutline,
         ),
@@ -1010,10 +842,7 @@ private fun RedInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (isOverdue) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = UtpadError.copy(alpha = 0.1f),
-                ) {
+                Surface(shape = RoundedCornerShape(8.dp), color = UtpadError.copy(alpha = 0.1f)) {
                     Text(
                         text = "⚠️ $days days overdue",
                         style = MaterialTheme.typography.labelSmall,
@@ -1066,11 +895,15 @@ private fun YellowInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
     val isOverdue = days > 3
     val totalBoxes = invoice.totalBoxes()
 
+    // Count pending (undispatched) flavors
+    val pendingFlavors = invoice.items.groupBy { it.flavorId }
+        .count { (_, group) -> !group.first().dispatched }
+
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(16.dp),
         color = UtpadSurface,
-        border = androidx.compose.foundation.BorderStroke(
+        border = BorderStroke(
             width = if (isOverdue) 2.dp else 1.dp,
             color = if (isOverdue) UtpadWarning else UtpadOutline,
         ),
@@ -1083,10 +916,7 @@ private fun YellowInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (isOverdue) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = UtpadWarning.copy(alpha = 0.15f),
-                ) {
+                Surface(shape = RoundedCornerShape(8.dp), color = UtpadWarning.copy(alpha = 0.15f)) {
                     Text(
                         text = "⚠️ $days days since packed",
                         style = MaterialTheme.typography.labelSmall,
@@ -1123,194 +953,11 @@ private fun YellowInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
                     color = UtpadWarning,
                 )
                 Text(
-                    text = if (days == 0) "packed today" else "packed ${days}d ago",
+                    text = if (pendingFlavors > 0) "$pendingFlavors flavor(s) pending"
+                           else if (days == 0) "packed today" else "packed ${days}d ago",
                     style = MaterialTheme.typography.labelSmall,
-                    color = UtpadTextSecondary,
+                    color = if (pendingFlavors > 0) UtpadWarning else UtpadTextSecondary,
                 )
-            }
-        }
-    }
-}
-
-// ── Yellow confirmation screen ─────────────────────────────────────────────
-
-@Composable
-private fun YellowConfirmContent(
-    invoice: InvoiceDto,
-    isLoading: Boolean,
-    allowedRoutes: Set<String>,
-    onNavigateToRoute: (String) -> Unit,
-    onConfirm: () -> Unit,
-) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Top),
-        ) {
-            OperationsModuleTabs(
-                currentRoute = AppRoute.Dispatch,
-                allowedRoutes = allowedRoutes,
-                onNavigateToRoute = onNavigateToRoute,
-            )
-
-            // Packed badge
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = UtpadWarning.copy(alpha = 0.12f),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "Packed · ready to dispatch",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = UtpadWarning,
-                    )
-                }
-            }
-
-            // Invoice details card
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = UtpadSurface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        text = "INVOICE DETAILS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = UtpadTextSecondary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = "Invoice",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = UtpadTextSecondary,
-                        )
-                        Text(
-                            text = invoice.invoiceNumber,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = UtpadTextPrimary,
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = "Customer",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = UtpadTextSecondary,
-                        )
-                        Text(
-                            text = invoice.customerName,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = UtpadTextPrimary,
-                        )
-                    }
-
-                    HorizontalDivider(color = UtpadOutline)
-
-                    Text(
-                        text = "ITEMS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = UtpadTextSecondary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-
-                    if (invoice.items.isEmpty()) {
-                        Text(
-                            text = "No items",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = UtpadTextSecondary,
-                        )
-                    } else {
-                        // Merge by flavor (same logic as ViewModel)
-                        val mergedItems = invoice.items
-                            .groupBy { it.flavorId }
-                            .map { (_, group) ->
-                                val boxes = group.mapNotNull { it.quantityBoxes }.takeIf { it.isNotEmpty() }?.sum()
-                                    ?: Math.ceil(group.sumOf { it.quantityUnits } / 15.0).toInt()
-                                Pair(group.first().flavorName, boxes)
-                            }
-
-                        mergedItems.forEach { (name, boxes) ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = UtpadTextPrimary,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text(
-                                    text = "$boxes boxes",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = UtpadWarning,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Confirm Dispatch button pinned to bottom
-        Surface(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth(),
-            shadowElevation = 20.dp,
-            color = UtpadSurface,
-            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-        ) {
-            Column(modifier = Modifier.padding(24.dp)) {
-                Button(
-                    onClick = onConfirm,
-                    enabled = !isLoading,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = UtpadWarning,
-                        contentColor = Color.White,
-                    ),
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = Color.White,
-                        )
-                    } else {
-                        Text("Confirm Dispatch", fontWeight = FontWeight.Bold)
-                    }
-                }
             }
         }
     }

@@ -7,6 +7,7 @@ import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
 import com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.GgCustomerDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
+import com.example.gudgum_prod_flow.data.remote.dto.InvoiceItemJson
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchFifoDto
 import com.example.gudgum_prod_flow.data.remote.dto.UpdateInvoiceStatusRequest
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
@@ -229,6 +230,97 @@ class DispatchRepository @Inject constructor(
         }
     }
 
+    /**
+     * Submit dispatch events for multiple flavors in one invoice.
+     * Only processes allocations passed in (caller filters to sufficient ones).
+     * Updates invoice status and items jsonb in a single PATCH after inserts.
+     */
+    suspend fun submitMultipleFlavorsDispatch(
+        invoiceId: String,
+        invoiceNumber: String,
+        customerName: String,
+        allocations: List<FifoAllocationResult>,
+        isPacked: Boolean,
+        isDispatched: Boolean,
+        dispatchDate: String,
+        workerId: String,
+        isOnline: Boolean,
+        updatedItems: List<InvoiceItemJson>,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (isOnline) {
+            runCatching {
+                for (result in allocations) {
+                    for (alloc in result.allocations) {
+                        val request = SubmitDispatchEventRequest(
+                            batchCode = alloc.batchCode,
+                            skuId = result.flavorId,
+                            boxesDispatched = alloc.unitsToTake,
+                            customerName = customerName,
+                            invoiceNumber = invoiceNumber,
+                            dispatchDate = dispatchDate,
+                            workerId = workerId,
+                            invoiceId = invoiceId,
+                            unitsDispatched = alloc.unitsToTake * 15,
+                            flavorId = result.flavorId,
+                            isPacked = isPacked,
+                            isDispatched = isDispatched,
+                        )
+                        val response = api.insertDispatchEvent(request)
+                        val code = response.code()
+                        if (code !in 200..204) {
+                            val errBody = response.errorBody()?.string() ?: ""
+                            Log.e(TAG, "insertDispatchEvent failed [$code] ${alloc.batchCode}: $errBody")
+                            error("Failed to record dispatch for ${alloc.batchCode}: HTTP $code")
+                        }
+                        Log.d(TAG, "insertDispatchEvent [$code] ${alloc.batchCode} flavor=${result.flavorId}")
+                    }
+                }
+                // Update status + items in one PATCH
+                try {
+                    val now = java.time.Instant.now().toString()
+                    api.updateInvoiceStatus(
+                        invoiceId = "eq.$invoiceId",
+                        body = UpdateInvoiceStatusRequest(
+                            isPacked = if (isPacked) true else null,
+                            packedAt = if (isPacked) now else null,
+                            isDispatched = if (isDispatched) true else null,
+                            dispatchedAt = if (isDispatched) now else null,
+                            items = updatedItems,
+                        ),
+                    )
+                    Log.d(TAG, "updateInvoiceStatus+items success for $invoiceId")
+                } catch (e: Exception) {
+                    Log.w(TAG, "updateInvoiceStatus non-fatal: ${e.message}")
+                }
+            }
+        } else {
+            runCatching {
+                val totalBoxes = allocations.sumOf { r -> r.allocations.sumOf { it.unitsToTake } }
+                pendingDao.insertEvent(
+                    PendingOperationEventEntity(
+                        module = "dispatch",
+                        workerId = workerId,
+                        workerName = WorkerIdentityStore.workerName,
+                        workerRole = WorkerIdentityStore.workerRole,
+                        batchCode = allocations.firstOrNull()?.allocations?.firstOrNull()?.batchCode ?: "",
+                        quantity = totalBoxes.toDouble(),
+                        unit = "boxes",
+                        summary = "Multi-flavor dispatch queued — $totalBoxes boxes for $invoiceNumber",
+                        payloadJson = JSONObject().apply {
+                            put("invoice_id", invoiceId)
+                            put("invoice_number", invoiceNumber)
+                            put("customer_name", customerName)
+                            put("total_boxes", totalBoxes)
+                            put("is_packed", isPacked)
+                            put("is_dispatched", isDispatched)
+                            put("dispatch_date", dispatchDate)
+                        }.toString(),
+                    )
+                )
+            }
+        }
+    }
+
     /** Toggle packed/dispatched status on an invoice */
     suspend fun updateInvoiceStatus(
         invoiceId: String,
@@ -262,5 +354,16 @@ data class FifoAllocation(
     val availableUnits: Int,
     val unitsToTake: Int,
 )
+
+/** FIFO allocation result for one flavor: computed stock snapshot + allocation lines */
+data class FifoAllocationResult(
+    val flavorId: String,
+    val flavorName: String,
+    val boxesNeeded: Int,
+    val availableBoxes: Int,
+    val allocations: List<FifoAllocation>,
+) {
+    val isSufficient: Boolean get() = availableBoxes >= boxesNeeded
+}
 
 private val WorkerIdentityStore get() = com.example.gudgum_prod_flow.data.session.WorkerIdentityStore

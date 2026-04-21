@@ -4,7 +4,8 @@
       "Bash(xargs grep:*)",
       "Bash(grep \".kt$\")",
       "Bash(./gradlew :app:compileDebugKotlin --no-daemon)",
-      "Bash(JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\" ./gradlew :app:compileDebugKotlin)"
+      "Bash(JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\" ./gradlew :app:compileDebugKotlin)",
+      "Bash(grep -i \"\\\\.kt$\")"
     ]
   }
 }
