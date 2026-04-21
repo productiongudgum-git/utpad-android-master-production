@@ -29,8 +29,10 @@ import javax.inject.Inject
 sealed class DispatchScreenState {
     /** Default: 2-column kanban overview of all undispatched invoices. */
     object Overview : DispatchScreenState()
-    /** 2-step FIFO wizard — used for both red and yellow invoices. */
+    /** 2-step FIFO wizard — red invoices + yellow Case 2 (partially dispatched). */
     object FifoWizard : DispatchScreenState()
+    /** Simple confirm screen — yellow Case 1 (never dispatched before). */
+    object YellowConfirm : DispatchScreenState()
 }
 
 @HiltViewModel
@@ -142,15 +144,39 @@ class DispatchViewModel @Inject constructor(
         loadMultiFifoForInvoice(isYellowFlow = false)
     }
 
-    /** Tap a yellow (packed) card: load FIFO for UNDISPATCHED flavors only, enter wizard. */
+    /**
+     * Tap a yellow (packed) card.
+     * Checks dispatch_events to determine which case applies:
+     *   Case 1 (count = 0): never dispatched → simple confirm screen, FIFO computed silently.
+     *   Case 2 (count > 0): partially dispatched → FIFO wizard for remaining flavors only.
+     */
     fun openYellowWizard(invoice: InvoiceDto) {
         _invoiceAlreadyPacked.value = true
         _isPacked.value = true
         _isDispatched.value = false
         prepareInvoice(invoice)
-        _currentWizardStep.value = 1
-        _screenState.value = DispatchScreenState.FifoWizard
-        loadMultiFifoForInvoice(isYellowFlow = true)
+        _multiFifoLoading.value = true  // show spinner immediately while we check
+        _screenState.value = DispatchScreenState.YellowConfirm  // navigate now, may redirect
+
+        viewModelScope.launch {
+            val alreadyDispatchedMap = repository.getAlreadyDispatchedPerFlavor(invoice.id)
+                .getOrElse { emptyMap() }
+            _alreadyDispatchedPerFlavor.value = alreadyDispatchedMap
+
+            val hasAnyPriorDispatch = alreadyDispatchedMap.values.any { it > 0 }
+
+            if (!hasAnyPriorDispatch) {
+                // Case 1: never dispatched — auto-dispatch all, no user input needed
+                _isDispatched.value = true
+                loadMultiFifoForInvoice(isYellowFlow = false)
+                // screen stays at YellowConfirm
+            } else {
+                // Case 2: partially dispatched — show FIFO wizard for remaining flavors
+                _currentWizardStep.value = 1
+                _screenState.value = DispatchScreenState.FifoWizard
+                loadMultiFifoForInvoice(isYellowFlow = true)
+            }
+        }
     }
 
     /** Navigate back to the 2-column overview and clear wizard state. */

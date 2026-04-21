@@ -146,10 +146,9 @@ class DispatchRepository @Inject constructor(
         dispatchDate: String,
         workerId: String,
         isOnline: Boolean,
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        if (isOnline) {
-            runCatching {
-                // 1. Insert dispatch event — FATAL: if this fails the whole operation fails
+    ): Result<Unit> = runCatching {
+        withContext(Dispatchers.IO) {
+            if (isOnline) {
                 for (alloc in allocations) {
                     val request = SubmitDispatchEventRequest(
                         batchCode = alloc.batchCode,
@@ -166,7 +165,6 @@ class DispatchRepository @Inject constructor(
                         isDispatched = isDispatched,
                     )
                     val response = api.insertDispatchEvent(request)
-                    // 200, 201, 204 are all valid success codes from Supabase
                     val code = response.code()
                     if (code !in 200..204) {
                         val errBody = response.errorBody()?.string() ?: ""
@@ -174,11 +172,7 @@ class DispatchRepository @Inject constructor(
                         error("Failed to record dispatch for batch ${alloc.batchCode}: HTTP $code")
                     }
                     Log.d(TAG, "insertDispatchEvent success [$code] for ${alloc.batchCode}")
-                    // Note: available stock is derived dynamically from packing_sessions minus
-                    // dispatch_events, so no production_batches patch is needed here.
                 }
-
-                // 2. Update invoice status — NON-FATAL: data is saved, log and continue
                 if (isPacked || isDispatched) {
                     try {
                         val now = java.time.Instant.now().toString()
@@ -200,9 +194,7 @@ class DispatchRepository @Inject constructor(
                         Log.w(TAG, "updateInvoiceStatus threw (non-fatal) for invoice $invoiceId: ${e.message}")
                     }
                 }
-            }
-        } else {
-            runCatching {
+            } else {
                 val totalUnits = allocations.sumOf { it.unitsToTake }
                 pendingDao.insertEvent(
                     PendingOperationEventEntity(
@@ -246,9 +238,9 @@ class DispatchRepository @Inject constructor(
         workerId: String,
         isOnline: Boolean,
         updatedItems: List<InvoiceItemJson>,
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        if (isOnline) {
-            runCatching {
+    ): Result<Unit> = runCatching {
+        withContext(Dispatchers.IO) {
+            if (isOnline) {
                 for (result in allocations) {
                     for (alloc in result.allocations) {
                         val request = SubmitDispatchEventRequest(
@@ -275,7 +267,6 @@ class DispatchRepository @Inject constructor(
                         Log.d(TAG, "insertDispatchEvent [$code] ${alloc.batchCode} flavor=${result.flavorId}")
                     }
                 }
-                // Update status + items in one PATCH
                 try {
                     val now = java.time.Instant.now().toString()
                     api.updateInvoiceStatus(
@@ -292,9 +283,7 @@ class DispatchRepository @Inject constructor(
                 } catch (e: Exception) {
                     Log.w(TAG, "updateInvoiceStatus non-fatal: ${e.message}")
                 }
-            }
-        } else {
-            runCatching {
+            } else {
                 val totalBoxes = allocations.sumOf { r -> r.allocations.sumOf { it.unitsToTake } }
                 pendingDao.insertEvent(
                     PendingOperationEventEntity(
@@ -326,8 +315,8 @@ class DispatchRepository @Inject constructor(
         invoiceId: String,
         isPacked: Boolean? = null,
         isDispatched: Boolean? = null,
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+    ): Result<Unit> = runCatching {
+        withContext(Dispatchers.IO) {
             if (isPacked != null || isDispatched != null) {
                 val now = java.time.Instant.now().toString()
                 val response = api.updateInvoiceStatus(

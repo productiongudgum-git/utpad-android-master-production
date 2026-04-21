@@ -142,6 +142,7 @@ fun DispatchScreen(
                         text = when (screenState) {
                             DispatchScreenState.Overview -> "Dispatch"
                             DispatchScreenState.FifoWizard -> "Dispatch Wizard"
+                            DispatchScreenState.YellowConfirm -> "Confirm Dispatch"
                         },
                         fontWeight = FontWeight.Bold,
                         color = UtpadTextPrimary,
@@ -155,6 +156,7 @@ fun DispatchScreen(
                                 if (currentStep > 1) viewModel.previousStep()
                                 else viewModel.backToOverview()
                             }
+                            DispatchScreenState.YellowConfirm -> viewModel.backToOverview()
                         }
                     }) {
                         Icon(
@@ -583,6 +585,218 @@ fun DispatchScreen(
                                 }
                             }
                         }
+                    }
+                }
+
+                // ── Yellow Case 1: simple confirm (never dispatched before) ───
+                DispatchScreenState.YellowConfirm -> {
+                    YellowConfirmContent(
+                        invoice = selectedInvoice,
+                        multiFifoLoading = multiFifoLoading,
+                        multiFifoAllocations = multiFifoAllocations,
+                        submitState = submitState,
+                        allowedRoutes = allowedRoutes,
+                        onNavigateToRoute = onNavigateToRoute,
+                        onConfirm = { viewModel.submit() },
+                    )
+
+                    if (submitState is SubmitState.Success) {
+                        SuccessOverlay(onDismiss = {
+                            viewModel.clearSubmitState()
+                            viewModel.reset()
+                        })
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Yellow Case 1: simple confirm composable ──────────────────────────────
+
+@Composable
+private fun YellowConfirmContent(
+    invoice: com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto?,
+    multiFifoLoading: Boolean,
+    multiFifoAllocations: List<FifoAllocationResult>,
+    submitState: SubmitState,
+    allowedRoutes: Set<String>,
+    onNavigateToRoute: (String) -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 100.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Top),
+        ) {
+            OperationsModuleTabs(
+                currentRoute = AppRoute.Dispatch,
+                allowedRoutes = allowedRoutes,
+                onNavigateToRoute = onNavigateToRoute,
+            )
+
+            // Packed badge
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = UtpadWarning.copy(alpha = 0.12f),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = "Packed · ready to dispatch",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = UtpadWarning,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+            }
+
+            // Invoice details card
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = UtpadSurface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "INVOICE DETAILS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = UtpadTextSecondary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("Invoice", style = MaterialTheme.typography.bodySmall, color = UtpadTextSecondary)
+                        Text(
+                            text = invoice?.invoiceNumber ?: "—",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = UtpadTextPrimary,
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("Customer", style = MaterialTheme.typography.bodySmall, color = UtpadTextSecondary)
+                        Text(
+                            text = invoice?.customerName ?: "—",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = UtpadTextPrimary,
+                        )
+                    }
+
+                    HorizontalDivider(color = UtpadOutline)
+
+                    Text(
+                        text = "ITEMS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = UtpadTextSecondary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+
+                    if (invoice == null || invoice.items.isEmpty()) {
+                        Text("No items", style = MaterialTheme.typography.bodySmall, color = UtpadTextSecondary)
+                    } else {
+                        invoice.items
+                            .groupBy { it.flavorId }
+                            .forEach { (_, group) ->
+                                val boxes = group.mapNotNull { it.quantityBoxes }.takeIf { it.isNotEmpty() }?.sum()
+                                    ?: Math.ceil(group.sumOf { it.quantityUnits } / 15.0).toInt()
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = group.first().flavorName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = UtpadTextPrimary,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        text = "$boxes boxes",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = UtpadWarning,
+                                    )
+                                }
+                            }
+                    }
+
+                    // Stock warning if any flavor is insufficient (computed silently)
+                    if (!multiFifoLoading && multiFifoAllocations.any { !it.isSufficient }) {
+                        HorizontalDivider(color = UtpadOutline)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = UtpadError.copy(alpha = 0.08f),
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "Stock warning — some flavors will be skipped:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = UtpadError,
+                                )
+                                multiFifoAllocations.filter { !it.isSufficient }.forEach { r ->
+                                    Text(
+                                        text = "• ${r.flavorName}: need ${r.boxesNeeded}, have ${r.availableBoxes}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = UtpadError,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Confirm Dispatch button pinned to bottom
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            shadowElevation = 20.dp,
+            color = UtpadSurface,
+            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Button(
+                    onClick = onConfirm,
+                    enabled = !multiFifoLoading
+                        && submitState !is SubmitState.Loading
+                        && multiFifoAllocations.any { it.isSufficient },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = UtpadWarning,
+                        contentColor = Color.White,
+                    ),
+                ) {
+                    when {
+                        multiFifoLoading || submitState is SubmitState.Loading -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White,
+                            )
+                        }
+                        else -> Text("Confirm Dispatch", fontWeight = FontWeight.Bold)
                     }
                 }
             }
