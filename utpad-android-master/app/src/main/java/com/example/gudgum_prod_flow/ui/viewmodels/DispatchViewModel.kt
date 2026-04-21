@@ -163,7 +163,11 @@ class DispatchViewModel @Inject constructor(
                 .getOrElse { emptyMap() }
             _alreadyDispatchedPerFlavor.value = alreadyDispatchedMap
 
+            val totalDispatched = alreadyDispatchedMap.values.sum()
             val hasAnyPriorDispatch = alreadyDispatchedMap.values.any { it > 0 }
+            Log.d(TAG, "openYellowWizard: invoiceId=${invoice.id} invoiceNumber=${invoice.invoiceNumber} " +
+                "flavorCount=${alreadyDispatchedMap.size} totalBoxesDispatched=$totalDispatched " +
+                "hasAnyPrior=$hasAnyPriorDispatch map=$alreadyDispatchedMap")
 
             if (!hasAnyPriorDispatch) {
                 // Case 1: never dispatched — simple confirm, no FIFO needed
