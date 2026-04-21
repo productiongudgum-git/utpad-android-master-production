@@ -350,7 +350,7 @@ class DispatchViewModel @Inject constructor(
 
             // All flavors dispatched → full dispatch; some insufficient → partial (stays yellow)
             val allFlavorsDispatched = allAllocations.all { it.isSufficient }
-            val finalIsDispatched = _isDispatched.value && allFlavorsDispatched
+            val finalIsDispatched = allFlavorsDispatched || _isDispatched.value
             val finalIsPacked = _isPacked.value || allFlavorsDispatched
 
             Log.d(TAG, "submit() invoice=${invoice.invoiceNumber} " +
