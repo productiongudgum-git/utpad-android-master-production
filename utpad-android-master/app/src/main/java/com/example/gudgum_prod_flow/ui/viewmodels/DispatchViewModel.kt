@@ -27,12 +27,12 @@ import javax.inject.Inject
 
 /** Top-level screen state for the Dispatch module. */
 sealed class DispatchScreenState {
-    /** Default: 2-column kanban overview of all undispatched invoices. */
+    /** 3-column kanban overview: RED / YELLOW / BLUE. */
     object Overview : DispatchScreenState()
-    /** 2-step FIFO wizard — red invoices + yellow Case 2 (partially dispatched). */
+    /** 2-step FIFO wizard — for RED (nothing packed) and YELLOW (partially packed) invoices. */
     object FifoWizard : DispatchScreenState()
-    /** Simple confirm screen — yellow Case 1 (never dispatched before). */
-    object YellowConfirm : DispatchScreenState()
+    /** Simple dispatch-confirm screen — for BLUE (fully packed, awaiting dispatch) invoices. */
+    object BlueConfirm : DispatchScreenState()
 }
 
 @HiltViewModel
@@ -48,11 +48,17 @@ class DispatchViewModel @Inject constructor(
     val screenState: StateFlow<DispatchScreenState> = _screenState.asStateFlow()
 
     // ── Overview lists ─────────────────────────────────────────────
+    // RED  : ALL flavors have packed_boxes = 0
+    // YELLOW: SOME flavors have packed_boxes < quantity_boxes
+    // BLUE : ALL flavors have packed_boxes >= quantity_boxes AND is_dispatched=false
     private val _redInvoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
     val redInvoices: StateFlow<List<InvoiceDto>> = _redInvoices.asStateFlow()
 
     private val _yellowInvoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
     val yellowInvoices: StateFlow<List<InvoiceDto>> = _yellowInvoices.asStateFlow()
+
+    private val _blueInvoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
+    val blueInvoices: StateFlow<List<InvoiceDto>> = _blueInvoices.asStateFlow()
 
     // ── Invoice / items ────────────────────────────────────────────
     private val _invoices = MutableStateFlow<List<InvoiceDto>>(emptyList())
@@ -74,7 +80,7 @@ class DispatchViewModel @Inject constructor(
     private val _multiFifoLoading = MutableStateFlow(false)
     val multiFifoLoading: StateFlow<Boolean> = _multiFifoLoading.asStateFlow()
 
-    // ── Step 2: Confirm ────────────────────────────────────────────
+    // ── Confirmation flags ─────────────────────────────────────────
     private val _isPacked = MutableStateFlow(false)
     val isPacked: StateFlow<Boolean> = _isPacked.asStateFlow()
 
@@ -85,12 +91,6 @@ class DispatchViewModel @Inject constructor(
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
     )
     val dispatchDate: StateFlow<String> = _dispatchDate.asStateFlow()
-
-    /** True when a yellow (already-packed) invoice is open — pre-ticks isPacked. */
-    private val _invoiceAlreadyPacked = MutableStateFlow(false)
-    val invoiceAlreadyPacked: StateFlow<Boolean> = _invoiceAlreadyPacked.asStateFlow()
-
-    private val _alreadyDispatchedPerFlavor = MutableStateFlow<Map<String, Int>>(emptyMap())
 
     // ── Common ─────────────────────────────────────────────────────
     private val _submitState = MutableStateFlow<SubmitState>(SubmitState.Idle)
@@ -103,6 +103,35 @@ class DispatchViewModel @Inject constructor(
     val allInvoices: StateFlow<List<InvoiceDto>> = _allInvoices.asStateFlow()
 
     private var isOnline: Boolean = true
+
+    // ── Column classification ──────────────────────────────────────
+
+    private enum class InvoiceColumn { RED, YELLOW, BLUE }
+
+    /**
+     * Classifies an invoice into RED / YELLOW / BLUE based purely on
+     * packed_boxes per flavor in items jsonb (no dispatch_events lookup).
+     *
+     * RED    = all flavors have packed_boxes == 0
+     * YELLOW = at least one flavor has 0 < packed_boxes < quantity_boxes
+     * BLUE   = all flavors have packed_boxes >= quantity_boxes (and not dispatched)
+     */
+    private fun invoiceColumn(invoice: InvoiceDto): InvoiceColumn {
+        val items = invoice.items
+        if (items.isEmpty()) return InvoiceColumn.RED
+        val allFullyPacked = items.all { item ->
+            val needed = if (item.quantityBoxes != null && item.quantityBoxes > 0)
+                item.quantityBoxes
+            else Math.ceil(item.quantityUnits / 15.0).toInt()
+            item.packedBoxes >= needed
+        }
+        val anyPacked = items.any { it.packedBoxes > 0 }
+        return when {
+            allFullyPacked -> InvoiceColumn.BLUE
+            anyPacked -> InvoiceColumn.YELLOW
+            else -> InvoiceColumn.RED
+        }
+    }
 
     init {
         loadInvoices()
@@ -124,8 +153,9 @@ class DispatchViewModel @Inject constructor(
             repository.getActiveInvoices().onSuccess { list ->
                 _invoices.value = list
                 _allInvoices.value = list
-                _redInvoices.value = list.filter { !it.isPacked }
-                _yellowInvoices.value = list.filter { it.isPacked }
+                _redInvoices.value = list.filter { invoiceColumn(it) == InvoiceColumn.RED }
+                _yellowInvoices.value = list.filter { invoiceColumn(it) == InvoiceColumn.YELLOW }
+                _blueInvoices.value = list.filter { invoiceColumn(it) == InvoiceColumn.BLUE }
             }
             _invoicesLoading.value = false
         }
@@ -133,57 +163,30 @@ class DispatchViewModel @Inject constructor(
 
     // ── Screen navigation ──────────────────────────────────────────
 
-    /** Tap a red (not-packed) card: load FIFO for ALL flavors, enter wizard. */
-    fun openRedWizard(invoice: InvoiceDto) {
-        _invoiceAlreadyPacked.value = false
+    /**
+     * Open the 2-step FIFO wizard for a RED or YELLOW invoice.
+     * FIFO remaining is calculated from packed_boxes in items jsonb.
+     */
+    fun openFifoWizard(invoice: InvoiceDto) {
         _isPacked.value = false
         _isDispatched.value = false
         prepareInvoice(invoice)
         _currentWizardStep.value = 1
         _screenState.value = DispatchScreenState.FifoWizard
-        loadMultiFifoForInvoice(isYellowFlow = false)
+        loadMultiFifoForInvoice()
     }
 
     /**
-     * Tap a yellow (packed) card.
-     * Checks dispatch_events to determine which case applies:
-     *   Case 1 (count = 0): never dispatched → simple confirm screen, FIFO computed silently.
-     *   Case 2 (count > 0): partially dispatched → FIFO wizard for remaining flavors only.
+     * Open the simple dispatch-confirm screen for a BLUE invoice.
+     * No FIFO needed — inventory was already reduced during packing.
      */
-    fun openYellowWizard(invoice: InvoiceDto) {
-        _invoiceAlreadyPacked.value = true
+    fun openBlueConfirm(invoice: InvoiceDto) {
+        prepareInvoice(invoice)
         _isPacked.value = true
         _isDispatched.value = false
-        prepareInvoice(invoice)
-        _multiFifoLoading.value = true  // show spinner immediately while we check
-        _screenState.value = DispatchScreenState.YellowConfirm  // navigate now, may redirect
-
-        viewModelScope.launch {
-            val alreadyDispatchedMap = repository.getAlreadyDispatchedPerFlavor(invoice.id)
-                .getOrElse { emptyMap() }
-            _alreadyDispatchedPerFlavor.value = alreadyDispatchedMap
-
-            val totalDispatched = alreadyDispatchedMap.values.sum()
-            val hasAnyPriorDispatch = alreadyDispatchedMap.values.any { it > 0 }
-            Log.d(TAG, "openYellowWizard: invoiceId=${invoice.id} invoiceNumber=${invoice.invoiceNumber} " +
-                "flavorCount=${alreadyDispatchedMap.size} totalBoxesDispatched=$totalDispatched " +
-                "hasAnyPrior=$hasAnyPriorDispatch map=$alreadyDispatchedMap")
-
-            if (!hasAnyPriorDispatch) {
-                // Case 1: never dispatched — simple confirm, no FIFO needed
-                _isDispatched.value = true
-                _multiFifoLoading.value = false  // no FIFO computation, button immediately ready
-                // screen stays at YellowConfirm
-            } else {
-                // Case 2: partially dispatched — show FIFO wizard for remaining flavors
-                _currentWizardStep.value = 1
-                _screenState.value = DispatchScreenState.FifoWizard
-                loadMultiFifoForInvoice(isYellowFlow = true)
-            }
-        }
+        _screenState.value = DispatchScreenState.BlueConfirm
     }
 
-    /** Navigate back to the 2-column overview and clear wizard state. */
     fun backToOverview() {
         _screenState.value = DispatchScreenState.Overview
         reset()
@@ -194,7 +197,6 @@ class DispatchViewModel @Inject constructor(
     private fun prepareInvoice(invoice: InvoiceDto) {
         _selectedInvoice.value = invoice
         _multiFifoAllocations.value = emptyList()
-        _alreadyDispatchedPerFlavor.value = emptyMap()
         _invoiceItems.value = invoice.items
             .groupBy { it.flavorId }
             .map { (flavorId, group) ->
@@ -204,6 +206,7 @@ class DispatchViewModel @Inject constructor(
                     flavorId = flavorId,
                     quantityUnits = group.sumOf { it.quantityUnits },
                     quantityBoxes = group.mapNotNull { it.quantityBoxes }.takeIf { it.isNotEmpty() }?.sum(),
+                    packedBoxes = group.sumOf { it.packedBoxes },
                     flavor = FlavorJoinDto(id = flavorId, name = group.first().flavorName, code = ""),
                 )
             }
@@ -211,51 +214,38 @@ class DispatchViewModel @Inject constructor(
 
     // ── Multi-flavor FIFO loading ──────────────────────────────────
 
-    private fun loadMultiFifoForInvoice(isYellowFlow: Boolean) {
-        val invoice = _selectedInvoice.value ?: return
+    /**
+     * Loads FIFO allocations for all flavors that still have remaining boxes to pack.
+     * remaining_to_pack = quantity_boxes - packed_boxes (from items jsonb).
+     */
+    private fun loadMultiFifoForInvoice() {
         val items = _invoiceItems.value
         if (items.isEmpty()) return
 
         _multiFifoLoading.value = true
         viewModelScope.launch {
-            // Fetch already-dispatched per flavor for this invoice
-            val alreadyDispatchedMap = repository.getAlreadyDispatchedPerFlavor(invoice.id)
-                .getOrElse { emptyMap() }
-            _alreadyDispatchedPerFlavor.value = alreadyDispatchedMap
+            val itemsWithRemaining = items.filter { it.remainingBoxes > 0 }
 
-            // For yellow flow: skip flavors already marked dispatched in items jsonb,
-            // or where all boxes have been dispatched via dispatch_events
-            val itemsToProcess = if (isYellowFlow) {
-                items.filter { item ->
-                    val jsonDispatched = invoice.items
-                        .firstOrNull { it.flavorId == item.flavorId }?.dispatched ?: false
-                    val alreadyDispatched = alreadyDispatchedMap[item.flavorId] ?: 0
-                    !jsonDispatched && alreadyDispatched < item.resolvedBoxes
-                }
-            } else items
-
-            if (itemsToProcess.isEmpty()) {
+            if (itemsWithRemaining.isEmpty()) {
                 _multiFifoAllocations.value = emptyList()
                 _multiFifoLoading.value = false
                 return@launch
             }
 
-            // Load FIFO for all flavors concurrently
             val results = try {
                 coroutineScope {
-                    itemsToProcess.map { item ->
+                    itemsWithRemaining.map { item ->
                         async {
-                            val alreadyDispatched = alreadyDispatchedMap[item.flavorId] ?: 0
-                            val delta = maxOf(0, item.resolvedBoxes - alreadyDispatched)
                             val inventory = repository.getInventoryByFlavor(item.flavorId)
                                 .getOrElse { emptyList() }
                             val totalAvailable = inventory.sumOf { it.expectedBoxes }
+                            val toAllocate = minOf(item.remainingBoxes, totalAvailable)
                             FifoAllocationResult(
                                 flavorId = item.flavorId,
                                 flavorName = item.flavor?.name ?: item.flavorId,
-                                boxesNeeded = delta,
+                                boxesNeeded = item.remainingBoxes,
                                 availableBoxes = totalAvailable,
-                                allocations = computeFifoFor(delta, inventory),
+                                allocations = computeFifoFor(toAllocate, inventory),
                             )
                         }
                     }.awaitAll()
@@ -267,18 +257,18 @@ class DispatchViewModel @Inject constructor(
 
             _multiFifoAllocations.value = results
             _multiFifoLoading.value = false
-            Log.d(TAG, "Loaded FIFO for ${results.size} flavors — " +
-                results.joinToString { "${it.flavorName}:${it.availableBoxes}/${it.boxesNeeded}" })
+            Log.d(TAG, "FIFO loaded for ${results.size} flavors — " +
+                results.joinToString { "${it.flavorName}: ${it.availableBoxes}/${it.boxesNeeded}" })
         }
     }
 
     private fun computeFifoFor(needed: Int, inventory: List<ProductionBatchFifoDto>): List<FifoAllocation> {
         val lines = mutableListOf<FifoAllocation>()
         var remaining = needed
-        for (item in inventory.sortedBy { it.productionDate }) {
+        for (batch in inventory.sortedBy { it.productionDate }) {
             if (remaining <= 0) break
-            val take = minOf(remaining, item.expectedBoxes)
-            lines.add(FifoAllocation(item.id, item.batchCode, item.expectedBoxes, take))
+            val take = minOf(remaining, batch.expectedBoxes)
+            lines.add(FifoAllocation(batch.id, batch.batchCode, batch.expectedBoxes, take))
             remaining -= take
         }
         return lines
@@ -290,15 +280,22 @@ class DispatchViewModel @Inject constructor(
         _isPacked.value = value
         if (!value) _isDispatched.value = false
     }
-    fun onDispatchedToggle(value: Boolean) { _isDispatched.value = value }
+
+    /** Dispatched toggle: only allows true when ALL FIFO allocations are sufficient. */
+    fun onDispatchedToggle(value: Boolean) {
+        val allSufficient = _multiFifoAllocations.value.isNotEmpty() &&
+            _multiFifoAllocations.value.all { it.isSufficient }
+        _isDispatched.value = if (value && !allSufficient) false else value
+    }
+
     fun onDispatchDateChanged(value: String) { _dispatchDate.value = value }
 
-    // ── Navigation ─────────────────────────────────────────────────
+    // ── Wizard navigation ──────────────────────────────────────────
 
     fun nextStep() {
         if (_currentWizardStep.value < 2) {
             _currentWizardStep.value = 2
-            // Auto-tick "dispatched" when every flavor has sufficient stock
+            // Auto-tick dispatched only when every flavor has full stock
             val allocs = _multiFifoAllocations.value
             if (allocs.isNotEmpty() && allocs.all { it.isSufficient }) {
                 _isDispatched.value = true
@@ -315,53 +312,58 @@ class DispatchViewModel @Inject constructor(
     fun submit() {
         if (_submitState.value is SubmitState.Loading) return
 
-        val invoice = _selectedInvoice.value
-        if (invoice == null) {
+        val invoice = _selectedInvoice.value ?: run {
             _submitState.value = SubmitState.Error("No invoice selected")
             return
         }
 
-        // Case 1 yellow: never dispatched, no pre-computed FIFO — repo handles it at submit time
-        if (_screenState.value == DispatchScreenState.YellowConfirm) {
-            submitYellowCase1(invoice)
+        if (_screenState.value == DispatchScreenState.BlueConfirm) {
+            submitBlueDispatch(invoice)
             return
         }
 
         if (!_isPacked.value) {
-            _submitState.value = SubmitState.Error("Mark invoice as packed before dispatching")
+            _submitState.value = SubmitState.Error("Tick 'Mark as Packed' before submitting")
             return
         }
 
         val allAllocations = _multiFifoAllocations.value
-        val sufficientAllocations = allAllocations.filter { it.isSufficient }
-
-        if (sufficientAllocations.isEmpty()) {
-            _submitState.value = SubmitState.Error("No flavors have sufficient stock to dispatch")
+        if (allAllocations.none { it.allocations.isNotEmpty() }) {
+            _submitState.value = SubmitState.Error("No stock available to pack")
             return
         }
 
         _submitState.value = SubmitState.Loading
         viewModelScope.launch {
-            // Mark dispatched=true in items jsonb for each successfully dispatched flavor
-            val dispatchedFlavorIds = sufficientAllocations.map { it.flavorId }.toSet()
+            // Accumulate packed_boxes per flavor for the invoice items jsonb update
+            val allocatedPerFlavor: Map<String, Int> = allAllocations.associate { r ->
+                r.flavorId to r.allocations.sumOf { it.unitsToTake }
+            }
             val updatedItems = invoice.items.map { item ->
-                if (item.flavorId in dispatchedFlavorIds) item.copy(dispatched = true) else item
+                val extra = allocatedPerFlavor[item.flavorId] ?: 0
+                item.copy(packedBoxes = item.packedBoxes + extra)
             }
 
-            // All flavors dispatched → full dispatch; some insufficient → partial (stays yellow)
-            val allFlavorsDispatched = allAllocations.all { it.isSufficient }
-            val finalIsDispatched = allFlavorsDispatched || _isDispatched.value
-            val finalIsPacked = _isPacked.value || allFlavorsDispatched
+            // Invoice is fully packed only when every flavor reaches its target
+            val allFullyPacked = updatedItems.isNotEmpty() && updatedItems.all { item ->
+                val needed = if (item.quantityBoxes != null && item.quantityBoxes > 0)
+                    item.quantityBoxes
+                else Math.ceil(item.quantityUnits / 15.0).toInt()
+                item.packedBoxes >= needed
+            }
 
-            Log.d(TAG, "submit() invoice=${invoice.invoiceNumber} " +
-                "sufficient=${sufficientAllocations.size}/${allAllocations.size} " +
-                "finalDispatched=$finalIsDispatched online=$isOnline")
+            // isDispatched only meaningful when fully packed
+            val finalIsPacked = allFullyPacked
+            val finalIsDispatched = _isDispatched.value && finalIsPacked
 
-            val result = repository.submitMultipleFlavorsDispatch(
+            Log.d(TAG, "submit() ${invoice.invoiceNumber} allFullyPacked=$allFullyPacked " +
+                "finalIsPacked=$finalIsPacked finalDispatched=$finalIsDispatched online=$isOnline")
+
+            val result = repository.submitFifoPackDispatch(
                 invoiceId = invoice.id,
                 invoiceNumber = invoice.invoiceNumber,
                 customerName = invoice.customerName,
-                allocations = sufficientAllocations,
+                allocations = allAllocations,
                 isPacked = finalIsPacked,
                 isDispatched = finalIsDispatched,
                 dispatchDate = _dispatchDate.value,
@@ -371,11 +373,12 @@ class DispatchViewModel @Inject constructor(
             )
 
             result.onSuccess {
-                val totalBoxes = sufficientAllocations.sumOf { r -> r.allocations.sumOf { it.unitsToTake } }
+                val totalBoxes = allAllocations.sumOf { r -> r.allocations.sumOf { it.unitsToTake } }
                 val msg = when {
-                    !isOnline -> "Dispatch saved offline — will sync when connected"
-                    allFlavorsDispatched -> "All $totalBoxes boxes dispatched for ${invoice.invoiceNumber}"
-                    else -> "$totalBoxes boxes dispatched (partial) — ${allAllocations.size - sufficientAllocations.size} flavor(s) pending stock"
+                    !isOnline -> "Saved offline — will sync when connected"
+                    finalIsDispatched -> "Invoice dispatched — $totalBoxes boxes"
+                    finalIsPacked -> "Fully packed — $totalBoxes boxes (awaiting dispatch)"
+                    else -> "$totalBoxes boxes packed (partial — more stock needed)"
                 }
                 Log.d(TAG, "submit() success: $msg")
                 _submitState.value = SubmitState.Success(msg)
@@ -384,35 +387,28 @@ class DispatchViewModel @Inject constructor(
             }
             result.onFailure { e ->
                 Log.e(TAG, "submit() failed: ${e.message}", e)
-                _submitState.value = SubmitState.Error(e.message ?: "Dispatch failed")
+                _submitState.value = SubmitState.Error(e.message ?: "Submit failed")
             }
         }
     }
 
-    private fun submitYellowCase1(invoice: InvoiceDto) {
-        val items = _invoiceItems.value
-        if (items.isEmpty()) {
-            _submitState.value = SubmitState.Error("No items found on invoice")
-            return
-        }
+    private fun submitBlueDispatch(invoice: InvoiceDto) {
         _submitState.value = SubmitState.Loading
         viewModelScope.launch {
-            val result = repository.submitYellowCase1Dispatch(
+            val result = repository.submitBlueDispatch(
                 invoiceId = invoice.id,
-                invoiceNumber = invoice.invoiceNumber,
-                customerName = invoice.customerName,
-                items = items,
+                dispatchDate = _dispatchDate.value,
                 workerId = WorkerIdentityStore.workerId,
                 isOnline = isOnline,
             )
             result.onSuccess {
-                Log.d(TAG, "Case1 dispatch success for ${invoice.invoiceNumber}")
+                Log.d(TAG, "submitBlueDispatch success for ${invoice.invoiceNumber}")
                 _submitState.value = SubmitState.Success("Invoice ${invoice.invoiceNumber} dispatched")
                 reset()
                 loadInvoices()
             }
             result.onFailure { e ->
-                Log.e(TAG, "Case1 dispatch failed: ${e.message}", e)
+                Log.e(TAG, "submitBlueDispatch failed: ${e.message}", e)
                 _submitState.value = SubmitState.Error(e.message ?: "Dispatch failed")
             }
         }
@@ -444,8 +440,6 @@ class DispatchViewModel @Inject constructor(
         _dispatchDate.value = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         _submitState.value = SubmitState.Idle
         _currentWizardStep.value = 1
-        _invoiceAlreadyPacked.value = false
-        _alreadyDispatchedPerFlavor.value = emptyMap()
     }
 
     fun clearSubmitState() { _submitState.value = SubmitState.Idle }

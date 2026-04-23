@@ -98,6 +98,8 @@ private fun InvoiceDto.totalBoxes(): Int =
         else Math.ceil(item.quantityUnits / 15.0).toInt()
     }
 
+private fun InvoiceDto.totalPackedBoxes(): Int = items.sumOf { it.packedBoxes }
+
 // ── Main screen ────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -113,6 +115,7 @@ fun DispatchScreen(
 
     val redInvoices by viewModel.redInvoices.collectAsState()
     val yellowInvoices by viewModel.yellowInvoices.collectAsState()
+    val blueInvoices by viewModel.blueInvoices.collectAsState()
     val invoicesLoading by viewModel.invoicesLoading.collectAsState()
 
     val selectedInvoice by viewModel.selectedInvoice.collectAsState()
@@ -123,7 +126,6 @@ fun DispatchScreen(
     val dispatchDate by viewModel.dispatchDate.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
     val currentStep by viewModel.currentWizardStep.collectAsState()
-    val invoiceAlreadyPacked by viewModel.invoiceAlreadyPacked.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -141,8 +143,8 @@ fun DispatchScreen(
                     Text(
                         text = when (screenState) {
                             DispatchScreenState.Overview -> "Dispatch"
-                            DispatchScreenState.FifoWizard -> "Dispatch Wizard"
-                            DispatchScreenState.YellowConfirm -> "Confirm Dispatch"
+                            DispatchScreenState.FifoWizard -> "Pack Wizard"
+                            DispatchScreenState.BlueConfirm -> "Confirm Dispatch"
                         },
                         fontWeight = FontWeight.Bold,
                         color = UtpadTextPrimary,
@@ -156,7 +158,7 @@ fun DispatchScreen(
                                 if (currentStep > 1) viewModel.previousStep()
                                 else viewModel.backToOverview()
                             }
-                            DispatchScreenState.YellowConfirm -> viewModel.backToOverview()
+                            DispatchScreenState.BlueConfirm -> viewModel.backToOverview()
                         }
                     }) {
                         Icon(
@@ -183,20 +185,22 @@ fun DispatchScreen(
         ) {
             when (screenState) {
 
-                // ── 2-column kanban overview ───────────────────────────────
+                // ── 3-column kanban overview ───────────────────────────────
                 DispatchScreenState.Overview -> {
                     DispatchOverviewContent(
                         allowedRoutes = allowedRoutes,
                         onNavigateToRoute = onNavigateToRoute,
                         redInvoices = redInvoices,
                         yellowInvoices = yellowInvoices,
+                        blueInvoices = blueInvoices,
                         isLoading = invoicesLoading,
-                        onRedCardTap = { viewModel.openRedWizard(it) },
-                        onYellowCardTap = { viewModel.openYellowWizard(it) },
+                        onRedCardTap = { viewModel.openFifoWizard(it) },
+                        onYellowCardTap = { viewModel.openFifoWizard(it) },
+                        onBlueCardTap = { viewModel.openBlueConfirm(it) },
                     )
                 }
 
-                // ── 2-step FIFO wizard ─────────────────────────────────────
+                // ── 2-step FIFO wizard (RED and YELLOW invoices) ───────────
                 DispatchScreenState.FifoWizard -> {
                     Column(
                         modifier = Modifier
@@ -217,7 +221,7 @@ fun DispatchScreen(
                             totalSteps = 2,
                             stepTitle = when (currentStep) {
                                 1 -> "Stock Allocation"
-                                else -> "Confirm & Dispatch"
+                                else -> "Confirm & Pack"
                             },
                         )
 
@@ -274,7 +278,7 @@ fun DispatchScreen(
                                             }
                                         } else if (multiFifoAllocations.isEmpty()) {
                                             Text(
-                                                text = "No pending flavors to dispatch for this invoice.",
+                                                text = "No pending flavors to pack for this invoice.",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = UtpadTextSecondary,
                                             )
@@ -283,17 +287,30 @@ fun DispatchScreen(
                                                 FlavorAllocationCard(result)
                                             }
 
-                                            // Summary banner if partial
-                                            val insufficientCount = multiFifoAllocations.count { !it.isSufficient }
-                                            if (insufficientCount > 0) {
+                                            val noStockCount = multiFifoAllocations.count { it.allocations.isEmpty() }
+                                            val partialCount = multiFifoAllocations.count { !it.isSufficient && it.allocations.isNotEmpty() }
+
+                                            if (noStockCount > 0) {
                                                 Surface(
                                                     shape = RoundedCornerShape(12.dp),
-                                                    color = UtpadWarning.copy(alpha = 0.1f),
+                                                    color = UtpadError.copy(alpha = 0.08f),
                                                 ) {
                                                     Text(
-                                                        text = "$insufficientCount flavor(s) have insufficient stock. " +
-                                                            "Only flavors with sufficient stock will be dispatched. " +
-                                                            "Invoice will move to PACKED (yellow) column.",
+                                                        text = "$noStockCount flavor(s) have zero stock and will be skipped.",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = UtpadError,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        modifier = Modifier.padding(12.dp),
+                                                    )
+                                                }
+                                            }
+                                            if (partialCount > 0) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    color = UtpadWarning.copy(alpha = 0.10f),
+                                                ) {
+                                                    Text(
+                                                        text = "$partialCount flavor(s) have partial stock. Available boxes will be packed; invoice moves to PARTIAL (yellow).",
                                                         style = MaterialTheme.typography.bodySmall,
                                                         color = UtpadWarning,
                                                         fontWeight = FontWeight.SemiBold,
@@ -306,7 +323,7 @@ fun DispatchScreen(
                                 }
                             }
 
-                            // ── Step 2: Confirm & status ──────────────────────
+                            // ── Step 2: Confirm & pack ────────────────────────
                             2 -> {
                                 Card(
                                     shape = RoundedCornerShape(24.dp),
@@ -318,12 +335,11 @@ fun DispatchScreen(
                                         verticalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
                                         Text(
-                                            text = "DISPATCH SUMMARY",
+                                            text = "PACKING SUMMARY",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = UtpadTextSecondary,
                                             fontWeight = FontWeight.SemiBold,
                                         )
-
                                         Text(
                                             text = "Invoice: ${selectedInvoice?.invoiceNumber ?: "—"}",
                                             style = MaterialTheme.typography.bodyMedium,
@@ -335,48 +351,54 @@ fun DispatchScreen(
                                             color = UtpadTextPrimary,
                                         )
 
-                                        val sufficient = multiFifoAllocations.filter { it.isSufficient }
-                                        val insufficient = multiFifoAllocations.filter { !it.isSufficient }
-                                        val totalBoxes = sufficient.sumOf { r -> r.allocations.sumOf { it.unitsToTake } }
+                                        HorizontalDivider(color = UtpadOutline)
 
-                                        if (sufficient.isNotEmpty()) {
+                                        // All flavors with allocations
+                                        val withStock = multiFifoAllocations.filter { it.allocations.isNotEmpty() }
+                                        val noStock = multiFifoAllocations.filter { it.allocations.isEmpty() }
+                                        val allSufficient = multiFifoAllocations.isNotEmpty() && multiFifoAllocations.all { it.isSufficient }
+
+                                        if (withStock.isNotEmpty()) {
                                             Surface(
                                                 shape = RoundedCornerShape(8.dp),
-                                                color = UtpadSuccess.copy(alpha = 0.1f),
+                                                color = UtpadSuccess.copy(alpha = 0.08f),
                                             ) {
                                                 Column(modifier = Modifier.padding(10.dp)) {
+                                                    val totalBoxes = withStock.sumOf { r -> r.allocations.sumOf { it.unitsToTake } }
                                                     Text(
-                                                        text = "Will dispatch: $totalBoxes boxes",
+                                                        text = "Will pack: $totalBoxes boxes",
                                                         style = MaterialTheme.typography.bodySmall,
                                                         fontWeight = FontWeight.Bold,
                                                         color = UtpadSuccess,
                                                     )
-                                                    sufficient.forEach { r ->
+                                                    withStock.forEach { r ->
+                                                        val boxes = r.allocations.sumOf { it.unitsToTake }
+                                                        val suffix = if (r.isSufficient) "✓" else "⚠️ ${boxes}/${r.boxesNeeded}"
                                                         Text(
-                                                            text = "• ${r.flavorName} — ${r.allocations.sumOf { it.unitsToTake }} boxes",
+                                                            text = "• ${r.flavorName} — $boxes boxes $suffix",
                                                             style = MaterialTheme.typography.bodySmall,
-                                                            color = UtpadSuccess,
+                                                            color = if (r.isSufficient) UtpadSuccess else UtpadWarning,
                                                         )
                                                     }
                                                 }
                                             }
                                         }
 
-                                        if (insufficient.isNotEmpty()) {
+                                        if (noStock.isNotEmpty()) {
                                             Surface(
                                                 shape = RoundedCornerShape(8.dp),
                                                 color = UtpadError.copy(alpha = 0.08f),
                                             ) {
                                                 Column(modifier = Modifier.padding(10.dp)) {
                                                     Text(
-                                                        text = "Will NOT dispatch (insufficient stock):",
+                                                        text = "Will skip (no stock):",
                                                         style = MaterialTheme.typography.bodySmall,
                                                         fontWeight = FontWeight.SemiBold,
                                                         color = UtpadError,
                                                     )
-                                                    insufficient.forEach { r ->
+                                                    noStock.forEach { r ->
                                                         Text(
-                                                            text = "• ${r.flavorName} — need ${r.boxesNeeded}, have ${r.availableBoxes}",
+                                                            text = "• ${r.flavorName} — need ${r.boxesNeeded} boxes",
                                                             style = MaterialTheme.typography.bodySmall,
                                                             color = UtpadError,
                                                         )
@@ -387,78 +409,15 @@ fun DispatchScreen(
 
                                         HorizontalDivider(color = UtpadOutline)
 
-                                        Column {
-                                            Text(
-                                                text = "DISPATCH DATE",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = UtpadTextSecondary,
-                                                fontWeight = FontWeight.SemiBold,
-                                            )
-                                            Spacer(modifier = Modifier.height(8.dp))
-                                            var showDatePicker by remember { mutableStateOf(false) }
-
-                                            Box(modifier = Modifier.fillMaxWidth()) {
-                                                OutlinedTextField(
-                                                    value = dispatchDate,
-                                                    onValueChange = {},
-                                                    placeholder = { Text("Select Date", color = UtpadTextSecondary) },
-                                                    singleLine = true,
-                                                    readOnly = true,
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    colors = OutlinedTextFieldDefaults.colors(
-                                                        focusedBorderColor = UtpadPrimary,
-                                                        unfocusedBorderColor = UtpadOutline,
-                                                        focusedContainerColor = UtpadBackground,
-                                                        unfocusedContainerColor = UtpadSurface,
-                                                    ),
-                                                    shape = RoundedCornerShape(16.dp),
-                                                )
-                                                Surface(
-                                                    modifier = Modifier.matchParentSize(),
-                                                    color = Color.Transparent,
-                                                    onClick = { showDatePicker = true },
-                                                ) {}
-                                            }
-
-                                            if (showDatePicker) {
-                                                val datePickerState = rememberDatePickerState()
-                                                DatePickerDialog(
-                                                    onDismissRequest = { showDatePicker = false },
-                                                    confirmButton = {
-                                                        TextButton(onClick = {
-                                                            val selectedMillis = datePickerState.selectedDateMillis
-                                                            if (selectedMillis != null) {
-                                                                val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-                                                                viewModel.onDispatchDateChanged(formatter.format(Date(selectedMillis)))
-                                                            }
-                                                            showDatePicker = false
-                                                        }) { Text("OK", color = UtpadPrimary) }
-                                                    },
-                                                    dismissButton = {
-                                                        TextButton(onClick = { showDatePicker = false }) {
-                                                            Text("Cancel", color = UtpadTextSecondary)
-                                                        }
-                                                    },
-                                                ) {
-                                                    DatePicker(state = datePickerState)
-                                                }
-                                            }
-                                        }
-
-                                        HorizontalDivider(color = UtpadOutline)
-
+                                        // Mark as Packed checkbox (required)
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier.fillMaxWidth(),
                                         ) {
                                             Checkbox(
                                                 checked = isPacked,
-                                                onCheckedChange = { if (!invoiceAlreadyPacked) viewModel.onPackedToggle(it) },
-                                                enabled = !invoiceAlreadyPacked,
-                                                colors = CheckboxDefaults.colors(
-                                                    checkedColor = UtpadPrimary,
-                                                    disabledCheckedColor = UtpadPrimary.copy(alpha = 0.5f),
-                                                ),
+                                                onCheckedChange = { viewModel.onPackedToggle(it) },
+                                                colors = CheckboxDefaults.colors(checkedColor = UtpadPrimary),
                                             )
                                             Column {
                                                 Text(
@@ -477,14 +436,16 @@ fun DispatchScreen(
                                             }
                                         }
 
+                                        // Mark as Dispatched checkbox (optional, requires all sufficient)
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier.fillMaxWidth(),
                                         ) {
+                                            val canDispatch = isPacked && allSufficient
                                             Checkbox(
                                                 checked = isDispatched,
                                                 onCheckedChange = { viewModel.onDispatchedToggle(it) },
-                                                enabled = isPacked,
+                                                enabled = canDispatch,
                                                 colors = CheckboxDefaults.colors(
                                                     checkedColor = UtpadSuccess,
                                                     disabledCheckedColor = UtpadOutline,
@@ -496,16 +457,31 @@ fun DispatchScreen(
                                                     text = "Mark Invoice as Dispatched",
                                                     style = MaterialTheme.typography.bodyMedium,
                                                     fontWeight = FontWeight.SemiBold,
-                                                    color = if (isPacked) UtpadTextPrimary else UtpadTextSecondary,
+                                                    color = if (canDispatch) UtpadTextPrimary else UtpadTextSecondary,
                                                 )
-                                                if (isPacked && multiFifoAllocations.any { !it.isSufficient }) {
-                                                    Text(
-                                                        text = "Partial — invoice will stay in yellow until all flavors are dispatched",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = UtpadWarning,
-                                                    )
-                                                }
+                                                Text(
+                                                    text = when {
+                                                        !isPacked -> "Tick Packed first"
+                                                        !allSufficient -> "Unavailable — partial stock (invoice will stay yellow)"
+                                                        else -> "Optional — invoice moves to BLUE if unchecked"
+                                                    },
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = when {
+                                                        !isPacked -> UtpadTextSecondary
+                                                        !allSufficient -> UtpadWarning
+                                                        else -> UtpadTextSecondary
+                                                    },
+                                                )
                                             }
+                                        }
+
+                                        // Dispatch date picker (shown only when dispatched is ticked)
+                                        if (isDispatched) {
+                                            HorizontalDivider(color = UtpadOutline)
+                                            DispatchDatePicker(
+                                                date = dispatchDate,
+                                                onDateSelected = { viewModel.onDispatchDateChanged(it) },
+                                            )
                                         }
                                     }
                                 }
@@ -513,7 +489,6 @@ fun DispatchScreen(
                         }
                     }
 
-                    // Success overlay
                     if (submitState is SubmitState.Success) {
                         SuccessOverlay(onDismiss = {
                             viewModel.clearSubmitState()
@@ -540,19 +515,15 @@ fun DispatchScreen(
                                         if (currentStep > 1) viewModel.previousStep()
                                         else viewModel.backToOverview()
                                     },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(56.dp),
+                                    modifier = Modifier.weight(1f).height(56.dp),
                                     shape = RoundedCornerShape(20.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        contentColor = UtpadTextPrimary,
-                                    ),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = UtpadTextPrimary),
                                 ) {
                                     Text("Back", fontWeight = FontWeight.Bold)
                                 }
 
                                 val canProceed = when (currentStep) {
-                                    1 -> !multiFifoLoading && multiFifoAllocations.any { it.isSufficient }
+                                    1 -> !multiFifoLoading && multiFifoAllocations.any { it.allocations.isNotEmpty() }
                                     else -> !multiFifoLoading && isPacked && submitState !is SubmitState.Loading
                                 }
 
@@ -560,9 +531,7 @@ fun DispatchScreen(
                                     onClick = {
                                         if (currentStep < 2) viewModel.nextStep() else viewModel.submit()
                                     },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(56.dp),
+                                    modifier = Modifier.weight(1f).height(56.dp),
                                     shape = RoundedCornerShape(20.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = UtpadPrimary,
@@ -578,7 +547,7 @@ fun DispatchScreen(
                                         )
                                     } else {
                                         Text(
-                                            if (currentStep < 2) "Proceed" else "Confirm Dispatch",
+                                            if (currentStep < 2) "Proceed" else "Confirm",
                                             fontWeight = FontWeight.Bold,
                                         )
                                     }
@@ -588,13 +557,15 @@ fun DispatchScreen(
                     }
                 }
 
-                // ── Yellow Case 1: simple confirm (never dispatched before) ───
-                DispatchScreenState.YellowConfirm -> {
-                    YellowConfirmContent(
+                // ── Blue confirm: fully packed, dispatch only ──────────────
+                DispatchScreenState.BlueConfirm -> {
+                    BlueConfirmContent(
                         invoice = selectedInvoice,
                         submitState = submitState,
+                        dispatchDate = dispatchDate,
                         allowedRoutes = allowedRoutes,
                         onNavigateToRoute = onNavigateToRoute,
+                        onDateChange = { viewModel.onDispatchDateChanged(it) },
                         onConfirm = { viewModel.submit() },
                     )
 
@@ -610,14 +581,17 @@ fun DispatchScreen(
     }
 }
 
-// ── Yellow Case 1: simple confirm composable ──────────────────────────────
+// ── Blue confirm screen: fully packed invoice, awaiting dispatch ───────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun YellowConfirmContent(
-    invoice: com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto?,
+private fun BlueConfirmContent(
+    invoice: InvoiceDto?,
     submitState: SubmitState,
+    dispatchDate: String,
     allowedRoutes: Set<String>,
     onNavigateToRoute: (String) -> Unit,
+    onDateChange: (String) -> Unit,
     onConfirm: () -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
@@ -626,7 +600,7 @@ private fun YellowConfirmContent(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 100.dp),
+                .padding(bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Top),
         ) {
             OperationsModuleTabs(
@@ -635,22 +609,20 @@ private fun YellowConfirmContent(
                 onNavigateToRoute = onNavigateToRoute,
             )
 
-            // Packed badge
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = UtpadWarning.copy(alpha = 0.12f),
+                color = UtpadPrimary.copy(alpha = 0.12f),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    text = "Packed · ready to dispatch",
+                    text = "Fully packed · ready to dispatch",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = UtpadWarning,
+                    color = UtpadPrimary,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 )
             }
 
-            // Invoice details card
             Card(
                 shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(containerColor = UtpadSurface),
@@ -696,7 +668,7 @@ private fun YellowConfirmContent(
                     HorizontalDivider(color = UtpadOutline)
 
                     Text(
-                        text = "ITEMS",
+                        text = "PACKED ITEMS",
                         style = MaterialTheme.typography.labelSmall,
                         color = UtpadTextSecondary,
                         fontWeight = FontWeight.SemiBold,
@@ -708,8 +680,9 @@ private fun YellowConfirmContent(
                         invoice.items
                             .groupBy { it.flavorId }
                             .forEach { (_, group) ->
-                                val boxes = group.mapNotNull { it.quantityBoxes }.takeIf { it.isNotEmpty() }?.sum()
+                                val needed = group.mapNotNull { it.quantityBoxes }.takeIf { it.isNotEmpty() }?.sum()
                                     ?: Math.ceil(group.sumOf { it.quantityUnits } / 15.0).toInt()
+                                val packed = group.sumOf { it.packedBoxes }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -723,20 +696,28 @@ private fun YellowConfirmContent(
                                         modifier = Modifier.weight(1f),
                                     )
                                     Text(
-                                        text = "$boxes boxes",
+                                        text = "$packed/$needed boxes ✓",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = UtpadWarning,
+                                        color = UtpadPrimary,
                                     )
                                 }
                             }
                     }
 
+                    HorizontalDivider(color = UtpadOutline)
+
+                    Text(
+                        text = "DISPATCH DATE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = UtpadTextSecondary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    DispatchDatePicker(date = dispatchDate, onDateSelected = onDateChange)
                 }
             }
         }
 
-        // Confirm Dispatch button pinned to bottom
         Surface(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -749,27 +730,74 @@ private fun YellowConfirmContent(
                 Button(
                     onClick = onConfirm,
                     enabled = submitState !is SubmitState.Loading,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
                     shape = RoundedCornerShape(20.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = UtpadWarning,
+                        containerColor = UtpadPrimary,
                         contentColor = Color.White,
                     ),
                 ) {
-                    when {
-                        submitState is SubmitState.Loading -> {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = Color.White,
-                            )
-                        }
-                        else -> Text("Confirm Dispatch", fontWeight = FontWeight.Bold)
+                    if (submitState is SubmitState.Loading) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                    } else {
+                        Text("Confirm Dispatch", fontWeight = FontWeight.Bold)
                     }
                 }
             }
+        }
+    }
+}
+
+// ── Dispatch date picker (shared) ──────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DispatchDatePicker(date: String, onDateSelected: (String) -> Unit) {
+    var showPicker by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = date,
+            onValueChange = {},
+            placeholder = { Text("Select date", color = UtpadTextSecondary) },
+            singleLine = true,
+            readOnly = true,
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = UtpadPrimary,
+                unfocusedBorderColor = UtpadOutline,
+                focusedContainerColor = UtpadBackground,
+                unfocusedContainerColor = UtpadSurface,
+            ),
+            shape = RoundedCornerShape(16.dp),
+        )
+        Surface(
+            modifier = Modifier.matchParentSize(),
+            color = Color.Transparent,
+            onClick = { showPicker = true },
+        ) {}
+    }
+
+    if (showPicker) {
+        val pickerState = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { millis ->
+                        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                        onDateSelected(fmt.format(Date(millis)))
+                    }
+                    showPicker = false
+                }) { Text("OK", color = UtpadPrimary) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPicker = false }) {
+                    Text("Cancel", color = UtpadTextSecondary)
+                }
+            },
+        ) {
+            DatePicker(state = pickerState)
         }
     }
 }
@@ -778,9 +806,16 @@ private fun YellowConfirmContent(
 
 @Composable
 private fun FlavorAllocationCard(result: FifoAllocationResult) {
-    val borderColor = if (result.isSufficient) UtpadSuccess else UtpadError
-    val bgColor = if (result.isSufficient) UtpadSuccess.copy(alpha = 0.06f) else UtpadError.copy(alpha = 0.06f)
-    val statusLabel = if (result.isSufficient) "✅" else "⚠️"
+    val (borderColor, bgColor, statusLabel) = when {
+        result.isSufficient -> Triple(UtpadSuccess, UtpadSuccess.copy(alpha = 0.06f), "✅")
+        result.allocations.isNotEmpty() -> Triple(UtpadWarning, UtpadWarning.copy(alpha = 0.06f), "⚠️")
+        else -> Triple(UtpadError, UtpadError.copy(alpha = 0.06f), "❌")
+    }
+    val textColor = when {
+        result.isSufficient -> UtpadSuccess
+        result.allocations.isNotEmpty() -> UtpadWarning
+        else -> UtpadError
+    }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -789,9 +824,7 @@ private fun FlavorAllocationCard(result: FifoAllocationResult) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
@@ -803,7 +836,7 @@ private fun FlavorAllocationCard(result: FifoAllocationResult) {
                     text = "$statusLabel ${result.flavorName}",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (result.isSufficient) UtpadSuccess else UtpadError,
+                    color = textColor,
                 )
                 Text(
                     text = "${result.availableBoxes} avail / ${result.boxesNeeded} needed",
@@ -812,14 +845,11 @@ private fun FlavorAllocationCard(result: FifoAllocationResult) {
                 )
             }
 
-            if (result.isSufficient && result.allocations.isNotEmpty()) {
+            if (result.allocations.isNotEmpty()) {
                 HorizontalDivider(color = borderColor.copy(alpha = 0.3f))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Batch", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(2f))
-                    Text("Available", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                    Text("Avail", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
                     Text("Take", style = MaterialTheme.typography.labelSmall, color = UtpadTextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                 }
                 result.allocations.forEach { alloc ->
@@ -848,15 +878,23 @@ private fun FlavorAllocationCard(result: FifoAllocationResult) {
                             text = "${alloc.unitsToTake}",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold,
-                            color = UtpadSuccess,
+                            color = textColor,
                             modifier = Modifier.weight(1f),
                             textAlign = TextAlign.End,
                         )
                     }
                 }
-            } else if (!result.isSufficient) {
+                if (!result.isSufficient) {
+                    Text(
+                        text = "Will pack ${result.availableBoxes}/${result.boxesNeeded} — invoice stays PARTIAL",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = UtpadWarning,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            } else {
                 Text(
-                    text = "Short by ${result.boxesNeeded - result.availableBoxes} boxes — will be skipped",
+                    text = "No stock available — flavor will be skipped",
                     style = MaterialTheme.typography.bodySmall,
                     color = UtpadError,
                 )
@@ -865,7 +903,7 @@ private fun FlavorAllocationCard(result: FifoAllocationResult) {
     }
 }
 
-// ── 2-column kanban overview ───────────────────────────────────────────────
+// ── 3-column kanban overview ───────────────────────────────────────────────
 
 @Composable
 private fun DispatchOverviewContent(
@@ -873,13 +911,12 @@ private fun DispatchOverviewContent(
     onNavigateToRoute: (String) -> Unit,
     redInvoices: List<InvoiceDto>,
     yellowInvoices: List<InvoiceDto>,
+    blueInvoices: List<InvoiceDto>,
     isLoading: Boolean,
     onRedCardTap: (InvoiceDto) -> Unit,
     onYellowCardTap: (InvoiceDto) -> Unit,
+    onBlueCardTap: (InvoiceDto) -> Unit,
 ) {
-    val redColor = UtpadError
-    val yellowColor = UtpadWarning
-
     val sortedRed = remember(redInvoices) {
         redInvoices.sortedWith(
             compareByDescending<InvoiceDto> { daysSince(it.createdAt) > 5 }
@@ -888,7 +925,13 @@ private fun DispatchOverviewContent(
     }
     val sortedYellow = remember(yellowInvoices) {
         yellowInvoices.sortedWith(
-            compareByDescending<InvoiceDto> { daysSince(it.packedAt ?: it.createdAt) > 3 }
+            compareByDescending<InvoiceDto> { daysSince(it.createdAt) > 3 }
+                .thenByDescending { it.createdAt ?: "" },
+        )
+    }
+    val sortedBlue = remember(blueInvoices) {
+        blueInvoices.sortedWith(
+            compareByDescending<InvoiceDto> { daysSince(it.packedAt ?: it.createdAt) > 2 }
                 .thenByDescending { it.createdAt ?: "" },
         )
     }
@@ -910,20 +953,20 @@ private fun DispatchOverviewContent(
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                // ── RED column ─────────────────────────────────────────
+                // ── RED: nothing packed ────────────────────────────────
                 LazyColumn(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     item {
-                        ColumnHeader(label = "NOT PACKED", count = sortedRed.size, color = redColor)
+                        ColumnHeader(label = "UNPACKED", count = sortedRed.size, color = UtpadError)
                         Spacer(modifier = Modifier.height(4.dp))
                     }
                     if (sortedRed.isEmpty()) {
-                        item { EmptyColumnHint("All invoices packed") }
+                        item { EmptyColumnHint("All packed") }
                     } else {
                         items(sortedRed, key = { it.id }) { invoice ->
                             RedInvoiceCard(invoice = invoice, onClick = { onRedCardTap(invoice) })
@@ -932,20 +975,39 @@ private fun DispatchOverviewContent(
                     item { Spacer(modifier = Modifier.height(16.dp)) }
                 }
 
-                // ── YELLOW column ──────────────────────────────────────
+                // ── YELLOW: partially packed ───────────────────────────
                 LazyColumn(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     item {
-                        ColumnHeader(label = "PACKED", count = sortedYellow.size, color = yellowColor)
+                        ColumnHeader(label = "PARTIAL", count = sortedYellow.size, color = UtpadWarning)
                         Spacer(modifier = Modifier.height(4.dp))
                     }
                     if (sortedYellow.isEmpty()) {
-                        item { EmptyColumnHint("Nothing packed yet") }
+                        item { EmptyColumnHint("None partial") }
                     } else {
                         items(sortedYellow, key = { it.id }) { invoice ->
                             YellowInvoiceCard(invoice = invoice, onClick = { onYellowCardTap(invoice) })
+                        }
+                    }
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
+                }
+
+                // ── BLUE: fully packed, awaiting dispatch ──────────────
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    item {
+                        ColumnHeader(label = "PACKED", count = sortedBlue.size, color = UtpadPrimary)
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                    if (sortedBlue.isEmpty()) {
+                        item { EmptyColumnHint("None ready") }
+                    } else {
+                        items(sortedBlue, key = { it.id }) { invoice ->
+                            BlueInvoiceCard(invoice = invoice, onClick = { onBlueCardTap(invoice) })
                         }
                     }
                     item { Spacer(modifier = Modifier.height(16.dp)) }
@@ -958,12 +1020,12 @@ private fun DispatchOverviewContent(
 @Composable
 private fun ColumnHeader(label: String, count: Int, color: Color) {
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(10.dp),
         color = color.copy(alpha = 0.1f),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -972,14 +1034,18 @@ private fun ColumnHeader(label: String, count: Int, color: Color) {
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            Surface(shape = RoundedCornerShape(8.dp), color = color) {
+            Spacer(modifier = Modifier.width(4.dp))
+            Surface(shape = RoundedCornerShape(6.dp), color = color) {
                 Text(
                     text = "$count",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
                 )
             }
         }
@@ -989,9 +1055,7 @@ private fun ColumnHeader(label: String, count: Int, color: Color) {
 @Composable
 private fun EmptyColumnHint(text: String) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 24.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -1011,7 +1075,7 @@ private fun RedInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
 
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = UtpadSurface,
         border = BorderStroke(
             width = if (isOverdue) 2.dp else 1.dp,
@@ -1020,25 +1084,23 @@ private fun RedInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
         shadowElevation = 2.dp,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             if (isOverdue) {
-                Surface(shape = RoundedCornerShape(8.dp), color = UtpadError.copy(alpha = 0.1f)) {
+                Surface(shape = RoundedCornerShape(6.dp), color = UtpadError.copy(alpha = 0.1f)) {
                     Text(
-                        text = "⚠️ $days days overdue",
+                        text = "⚠️ ${days}d",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = UtpadError,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
                     )
                 }
             }
             Text(
                 text = invoice.invoiceNumber,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
                 color = UtpadTextPrimary,
                 maxLines = 1,
@@ -1046,7 +1108,7 @@ private fun RedInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
             )
             Text(
                 text = invoice.customerName,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 color = UtpadTextSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1054,16 +1116,15 @@ private fun RedInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "$totalBoxes boxes",
+                    text = "$totalBoxes bx",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = UtpadError,
                 )
                 Text(
-                    text = if (days == 0) "today" else "${days}d ago",
+                    text = if (days == 0) "today" else "${days}d",
                     style = MaterialTheme.typography.labelSmall,
                     color = UtpadTextSecondary,
                 )
@@ -1074,18 +1135,14 @@ private fun RedInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
 
 @Composable
 private fun YellowInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
-    val packedRef = invoice.packedAt ?: invoice.createdAt
-    val days = daysSince(packedRef)
+    val days = daysSince(invoice.createdAt)
     val isOverdue = days > 3
     val totalBoxes = invoice.totalBoxes()
-
-    // Count pending (undispatched) flavors
-    val pendingFlavors = invoice.items.groupBy { it.flavorId }
-        .count { (_, group) -> !group.first().dispatched }
+    val packedBoxes = invoice.totalPackedBoxes()
 
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = UtpadSurface,
         border = BorderStroke(
             width = if (isOverdue) 2.dp else 1.dp,
@@ -1094,25 +1151,23 @@ private fun YellowInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
         shadowElevation = 2.dp,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             if (isOverdue) {
-                Surface(shape = RoundedCornerShape(8.dp), color = UtpadWarning.copy(alpha = 0.15f)) {
+                Surface(shape = RoundedCornerShape(6.dp), color = UtpadWarning.copy(alpha = 0.15f)) {
                     Text(
-                        text = "⚠️ $days days since packed",
+                        text = "⚠️ ${days}d",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = UtpadWarning,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
                     )
                 }
             }
             Text(
                 text = invoice.invoiceNumber,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
                 color = UtpadTextPrimary,
                 maxLines = 1,
@@ -1120,7 +1175,64 @@ private fun YellowInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
             )
             Text(
                 text = invoice.customerName,
+                style = MaterialTheme.typography.labelSmall,
+                color = UtpadTextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "$packedBoxes/$totalBoxes bx",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = UtpadWarning,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BlueInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
+    val packedRef = invoice.packedAt ?: invoice.createdAt
+    val days = daysSince(packedRef)
+    val isOverdue = days > 2
+    val totalBoxes = invoice.totalBoxes()
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = UtpadSurface,
+        border = BorderStroke(
+            width = if (isOverdue) 2.dp else 1.dp,
+            color = if (isOverdue) UtpadPrimary else UtpadOutline,
+        ),
+        shadowElevation = 2.dp,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            if (isOverdue) {
+                Surface(shape = RoundedCornerShape(6.dp), color = UtpadPrimary.copy(alpha = 0.12f)) {
+                    Text(
+                        text = "⏳ ${days}d",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = UtpadPrimary,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            Text(
+                text = invoice.invoiceNumber,
                 style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                color = UtpadTextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = invoice.customerName,
+                style = MaterialTheme.typography.labelSmall,
                 color = UtpadTextSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1128,19 +1240,17 @@ private fun YellowInvoiceCard(invoice: InvoiceDto, onClick: () -> Unit) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "$totalBoxes boxes",
+                    text = "$totalBoxes bx",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = UtpadWarning,
+                    color = UtpadPrimary,
                 )
                 Text(
-                    text = if (pendingFlavors > 0) "$pendingFlavors flavor(s) pending"
-                           else if (days == 0) "packed today" else "packed ${days}d ago",
+                    text = if (days == 0) "today" else "${days}d",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (pendingFlavors > 0) UtpadWarning else UtpadTextSecondary,
+                    color = UtpadTextSecondary,
                 )
             }
         }
