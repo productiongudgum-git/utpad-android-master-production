@@ -382,7 +382,6 @@ class DispatchViewModel @Inject constructor(
                 }
                 Log.d(TAG, "submit() success: $msg")
                 _submitState.value = SubmitState.Success(msg)
-                reset()
                 loadInvoices()
             }
             result.onFailure { e ->
@@ -404,7 +403,6 @@ class DispatchViewModel @Inject constructor(
             result.onSuccess {
                 Log.d(TAG, "submitBlueDispatch success for ${invoice.invoiceNumber}")
                 _submitState.value = SubmitState.Success("Invoice ${invoice.invoiceNumber} dispatched")
-                reset()
                 loadInvoices()
             }
             result.onFailure { e ->
@@ -438,8 +436,8 @@ class DispatchViewModel @Inject constructor(
         _isPacked.value = false
         _isDispatched.value = false
         _dispatchDate.value = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        _submitState.value = SubmitState.Idle
         _currentWizardStep.value = 1
+        _screenState.value = DispatchScreenState.Overview
     }
 
     fun clearSubmitState() { _submitState.value = SubmitState.Idle }
