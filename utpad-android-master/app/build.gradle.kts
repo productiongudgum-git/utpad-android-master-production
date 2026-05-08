@@ -14,7 +14,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.gudgum_prod_flow"
+        applicationId = "com.gudgum"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
