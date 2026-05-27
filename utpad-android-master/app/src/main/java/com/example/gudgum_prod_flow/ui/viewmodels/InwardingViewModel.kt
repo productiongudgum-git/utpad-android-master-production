@@ -197,7 +197,9 @@ class InwardingViewModel @Inject constructor(
                 return@launch
             }
 
-            repository.createIngredient(name.trim(), unit, vendorId)
+            // Phase 10 — store canonical default_unit (kg→g, L→ml).
+            val canonicalUnit = toCanonical(0.0, unit).unit
+            repository.createIngredient(name.trim(), canonicalUnit, vendorId)
                 .onSuccess { entity ->
                     onIngredientSelected(entity)
                     onVendorSelected(Vendor(id = vendorId, name = supplierName))
@@ -291,11 +293,16 @@ class InwardingViewModel @Inject constructor(
                 rawUri
             }
 
+            // Phase 10 — convert to canonical units before persisting so
+            // the database only ever stores grams / ml / pcs. Worker still
+            // sees their original entry ("40 kg") in the success toast.
+            val canonical = toCanonical(qty, _selectedUnit.value)
+
             val result = repository.submitInwardEvent(
                 request = GgInwardingRequest(
                     ingredientId = ingredient.id,
-                    qty = qty,
-                    unit = _selectedUnit.value,
+                    qty = canonical.qty,
+                    unit = canonical.unit,
                     vendorId = vendor.id,
                     inwardDate = _inwardDate.value,
                     expiryDate = _expiryDate.value.ifBlank { null },
@@ -375,4 +382,25 @@ class InwardingViewModel @Inject constructor(
 
     fun reset() { resetInward(); resetReturn() }
     fun clearSubmitState() { _submitState.value = SubmitState.Idle }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Phase 10 — canonical unit conversion
+    // ──────────────────────────────────────────────────────────────────
+    //
+    // Storage rule (matches the web app and DB migration 0004):
+    //   weight  → g    (grams)
+    //   volume  → ml   (millilitres)
+    //   count   → pcs
+    //
+    // Worker UX keeps kg/L/g/ml as input chips, but we convert before
+    // writing so the database only ever sees canonical values.
+
+    data class Canonical(val qty: Double, val unit: String)
+
+    private fun toCanonical(qty: Double, unit: String): Canonical = when (unit.lowercase()) {
+        "kg" -> Canonical(qty * 1000, "g")
+        "l"  -> Canonical(qty * 1000, "ml")
+        "g", "ml", "pcs" -> Canonical(qty, unit.lowercase())
+        else -> Canonical(qty, unit) // unknown — pass through
+    }
 }

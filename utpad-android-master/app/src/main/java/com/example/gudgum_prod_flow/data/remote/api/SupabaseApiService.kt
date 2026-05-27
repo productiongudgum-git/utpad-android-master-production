@@ -77,6 +77,13 @@ interface SupabaseApiService {
         @Header("Prefer") prefer: String = "return=minimal",
     ): Response<Unit>
 
+    // Per-ingredient planned vs actual amounts for a batch (one POST inserts all rows).
+    @POST("rest/v1/production_batch_ingredients")
+    suspend fun insertProductionBatchIngredients(
+        @Body rows: List<ProductionBatchIngredientRow>,
+        @Header("Prefer") prefer: String = "return=minimal",
+    ): Response<Unit>
+
     @GET("rest/v1/production_batches")
     suspend fun findProductionBatch(
         @Query("batch_code") batchCode: String,

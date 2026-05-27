@@ -93,6 +93,7 @@ class SyncWorker @AssistedInject constructor(
             val batchResp = SupabaseApiClient.api.insertProductionBatch(request)
             val errorBody = batchResp.errorBody()?.string().orEmpty()
             if (batchResp.isSuccessful || batchResp.code() == 201) {
+                syncBatchIngredients(payload, batchCode, skuId)
                 true
             } else if (isDuplicateKeyConflict(batchResp.code(), errorBody)) {
                 true
@@ -100,6 +101,25 @@ class SyncWorker @AssistedInject constructor(
                 false
             }
         } catch (e: Exception) { false }
+    }
+
+    /** Replay the per-ingredient rows queued with an offline production batch (best-effort). */
+    private suspend fun syncBatchIngredients(payload: JSONObject, batchCode: String, flavorId: String) {
+        val arr = payload.optJSONArray("ingredients") ?: return
+        if (arr.length() == 0) return
+        val rows = (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            ProductionBatchIngredientRow(
+                batchCode = o.optString("batch_code", batchCode),
+                flavorId = o.optString("flavor_id", flavorId),
+                ingredientId = o.optString("ingredient_id"),
+                plannedQty = if (o.isNull("planned_qty")) null else o.optDouble("planned_qty"),
+                actualQty = if (o.isNull("actual_qty")) null else o.optDouble("actual_qty"),
+            )
+        }
+        if (rows.isNotEmpty()) {
+            runCatching { SupabaseApiClient.api.insertProductionBatchIngredients(rows) }
+        }
     }
 
     private suspend fun syncPackingSession(payloadJson: String, batchCode: String, workerId: String): Boolean {

@@ -52,6 +52,16 @@ data class SubmitProductionBatchRequest(
     @SerialName("batch_number") val batchNumber: Int? = null,
 )
 
+/** One ingredient's planned (recipe) vs actual (worker-entered) amount, in grams, for a batch. */
+@Serializable
+data class ProductionBatchIngredientRow(
+    @SerialName("batch_code") val batchCode: String,
+    @SerialName("flavor_id") val flavorId: String,
+    @SerialName("ingredient_id") val ingredientId: String,
+    @SerialName("planned_qty") val plannedQty: Double? = null,
+    @SerialName("actual_qty") val actualQty: Double? = null,
+)
+
 @Serializable
 data class ProductionBatchDto(
     val id: String? = null,

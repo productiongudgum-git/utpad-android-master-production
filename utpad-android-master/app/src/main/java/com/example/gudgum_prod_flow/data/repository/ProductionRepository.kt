@@ -11,11 +11,13 @@ import com.example.gudgum_prod_flow.data.local.entity.CachedRecipeLineEntity
 import com.example.gudgum_prod_flow.data.local.entity.PendingOperationEventEntity
 import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchDto
+import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchIngredientRow
 import com.example.gudgum_prod_flow.data.remote.dto.SubmitProductionBatchRequest
 import com.example.gudgum_prod_flow.util.isDuplicateKeyConflict
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -161,6 +163,7 @@ class ProductionRepository @Inject constructor(
         expectedBoxes: Int? = null,
         expectedUnits: Int? = null,
         batchNumber: Int? = null,
+        ingredients: List<ProductionBatchIngredientRow> = emptyList(),
     ): Result<Unit> = withContext(Dispatchers.IO) {
         if (isOnline) {
             runCatching {
@@ -206,6 +209,15 @@ class ProductionRepository @Inject constructor(
                     }
                     error("Production batch save failed: $msg")
                 }
+
+                // Best-effort: persist per-ingredient planned vs actual amounts.
+                // The batch is already saved, so don't fail the submit if this errors.
+                if (ingredients.isNotEmpty()) {
+                    runCatching {
+                        val ingResp = api.insertProductionBatchIngredients(ingredients)
+                        Log.d(TAG, "Batch ingredients save HTTP ${ingResp.code()} (${ingredients.size} rows)")
+                    }.onFailure { Log.w(TAG, "Batch ingredients save failed: ${it.message}") }
+                }
             }
         } else {
             runCatching {
@@ -222,6 +234,19 @@ class ProductionRepository @Inject constructor(
                     put("expected_boxes", expectedBoxes ?: JSONObject.NULL)
                     put("expected_units", expectedUnits ?: JSONObject.NULL)
                     put("batch_number", batchNumber ?: JSONObject.NULL)
+                }
+                if (ingredients.isNotEmpty()) {
+                    val arr = JSONArray()
+                    ingredients.forEach { ing ->
+                        arr.put(JSONObject().apply {
+                            put("batch_code", ing.batchCode)
+                            put("flavor_id", ing.flavorId)
+                            put("ingredient_id", ing.ingredientId)
+                            put("planned_qty", ing.plannedQty ?: JSONObject.NULL)
+                            put("actual_qty", ing.actualQty ?: JSONObject.NULL)
+                        })
+                    }
+                    payload.put("ingredients", arr)
                 }
                 pendingDao.insertEvent(
                     PendingOperationEventEntity(

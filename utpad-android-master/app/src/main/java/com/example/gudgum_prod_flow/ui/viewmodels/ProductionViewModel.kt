@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
 import com.example.gudgum_prod_flow.data.local.entity.CachedRecipeLineEntity
 import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
+import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchIngredientRow
 import com.example.gudgum_prod_flow.data.repository.ProductionRepository
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
 import android.util.Log
@@ -263,6 +264,19 @@ class ProductionViewModel @Inject constructor(
                 .getOrDefault(0)
             val batchNumber = existingCount + 1
 
+            // Per-ingredient planned vs actual amounts (in grams) so the web can
+            // show exactly what the worker used versus the recipe.
+            val ingredientRows = _recipe.value.map { ing ->
+                val factor = toKgFactor(ing.unit)
+                ProductionBatchIngredientRow(
+                    batchCode = batchCode,
+                    flavorId = flavor.id,
+                    ingredientId = ing.ingredientId,
+                    plannedQty = (ing.plannedQty.toDoubleOrNull() ?: 0.0) * factor * 1000.0,
+                    actualQty = (ing.actualQty.toDoubleOrNull() ?: 0.0) * factor * 1000.0,
+                )
+            }
+
             val result = repository.submitBatch(
                 batchCode = batchCode,
                 skuId = flavor.id,
@@ -276,6 +290,7 @@ class ProductionViewModel @Inject constructor(
                 expectedBoxes = expectedBoxes,
                 expectedUnits = expectedUnits,
                 batchNumber = batchNumber,
+                ingredients = ingredientRows,
             )
 
             result.onSuccess {
