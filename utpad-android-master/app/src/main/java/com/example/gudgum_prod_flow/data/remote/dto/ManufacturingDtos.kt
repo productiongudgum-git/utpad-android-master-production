@@ -57,6 +57,7 @@ data class SubmitProductionBatchRequest(
 data class ProductionBatchIngredientRow(
     @SerialName("batch_code") val batchCode: String,
     @SerialName("flavor_id") val flavorId: String,
+    @SerialName("batch_number") val batchNumber: Int? = null,
     @SerialName("ingredient_id") val ingredientId: String,
     @SerialName("planned_qty") val plannedQty: Double? = null,
     @SerialName("actual_qty") val actualQty: Double? = null,

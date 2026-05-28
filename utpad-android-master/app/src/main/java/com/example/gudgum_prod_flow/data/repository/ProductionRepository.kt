@@ -241,6 +241,7 @@ class ProductionRepository @Inject constructor(
                         arr.put(JSONObject().apply {
                             put("batch_code", ing.batchCode)
                             put("flavor_id", ing.flavorId)
+                            put("batch_number", ing.batchNumber ?: JSONObject.NULL)
                             put("ingredient_id", ing.ingredientId)
                             put("planned_qty", ing.plannedQty ?: JSONObject.NULL)
                             put("actual_qty", ing.actualQty ?: JSONObject.NULL)

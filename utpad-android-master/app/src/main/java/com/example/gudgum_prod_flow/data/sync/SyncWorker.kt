@@ -112,6 +112,7 @@ class SyncWorker @AssistedInject constructor(
             ProductionBatchIngredientRow(
                 batchCode = o.optString("batch_code", batchCode),
                 flavorId = o.optString("flavor_id", flavorId),
+                batchNumber = if (o.isNull("batch_number")) null else o.optInt("batch_number"),
                 ingredientId = o.optString("ingredient_id"),
                 plannedQty = if (o.isNull("planned_qty")) null else o.optDouble("planned_qty"),
                 actualQty = if (o.isNull("actual_qty")) null else o.optDouble("actual_qty"),

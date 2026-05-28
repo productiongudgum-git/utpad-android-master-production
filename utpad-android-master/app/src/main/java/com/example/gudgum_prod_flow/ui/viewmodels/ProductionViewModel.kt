@@ -271,6 +271,7 @@ class ProductionViewModel @Inject constructor(
                 ProductionBatchIngredientRow(
                     batchCode = batchCode,
                     flavorId = flavor.id,
+                    batchNumber = batchNumber,
                     ingredientId = ing.ingredientId,
                     plannedQty = (ing.plannedQty.toDoubleOrNull() ?: 0.0) * factor * 1000.0,
                     actualQty = (ing.actualQty.toDoubleOrNull() ?: 0.0) * factor * 1000.0,
