@@ -18,7 +18,8 @@ import javax.inject.Singleton
 class AuthRepository @Inject constructor(
     private val database: AppDatabase,
     private val tokenManager: TokenManager,
-    private val connectivityObserver: ConnectivityObserver
+    private val connectivityObserver: ConnectivityObserver,
+    private val workerDeviceRepository: WorkerDeviceRepository,
 ) {
     private companion object {
         const val TAG = "AuthRepository"
@@ -79,6 +80,12 @@ class AuthRepository @Inject constructor(
                         createdAt = System.currentTimeMillis()
                     )
                 )
+
+                // Register the device's FCM token now that the worker is known.
+                // No-op if the worker isn't a Dispatch_Staff role — the Edge Function
+                // filters on role before sending, so non-dispatch tokens just sit unused.
+                runCatching { workerDeviceRepository.registerOnLogin() }
+                    .onFailure { Log.w(TAG, "FCM device registration skipped: ${it.message}") }
 
                 AuthResult.Success(
                     user = User(
@@ -145,6 +152,10 @@ class AuthRepository @Inject constructor(
 
     suspend fun logout() {
         Log.i(TAG, "Logout requested")
+        // Deregister this device so it stops getting dispatch pushes for the
+        // worker who just signed out (fire-and-forget — don't block logout).
+        runCatching { workerDeviceRepository.clearOnLogout() }
+            .onFailure { Log.w(TAG, "FCM device clear-on-logout failed: ${it.message}") }
         tokenManager.clearTokens()
     }
 }

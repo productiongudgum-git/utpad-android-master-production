@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -17,8 +18,8 @@ android {
         applicationId = "com.gudgum.invmgt"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.0.5"
+        versionCode = 7
+        versionName = "1.0.6"
         buildConfigField("String", "OPS_API_BASE_URL", "\"https://utpad-ops-api-seven.vercel.app/api/v1/\"")
         buildConfigField("String", "SUPABASE_URL", "\"https://hafaxgyaxmypmmpbemos.supabase.co/\"")
         buildConfigField("String", "SUPABASE_API_URL", "\"https://hafaxgyaxmypmmpbemos.supabase.co\"")
@@ -124,6 +125,11 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.google.mlkit.barcode.scanning)
+
+    // Firebase Cloud Messaging — push notifications for invoice-created events.
+    // BoM pins all firebase-* artifacts to a compatible set; we only need messaging.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging.ktx)
 
     // Unit Testing
     testImplementation(libs.junit)
