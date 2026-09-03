@@ -28,4 +28,38 @@ interface OperationsApiService {
     suspend fun unregisterWorkerDevice(
         @Path("token") fcmToken: String,
     ): Response<Unit>
+
+    // ── D2C dispatch requests ────────────────────────────────────────────────
+    @POST("ops/d2c-requests")
+    suspend fun createD2CRequest(
+        @Body request: com.example.gudgum_prod_flow.data.remote.dto.CreateD2CRequestPayload,
+    ): Response<com.example.gudgum_prod_flow.data.remote.dto.CreateD2CRequestResponse>
+
+    @retrofit2.http.GET("ops/d2c-requests")
+    suspend fun listD2CRequests(
+        @retrofit2.http.Query("worker_id") workerId: String? = null,
+        @retrofit2.http.Query("status")    status: String? = null,
+    ): Response<List<com.example.gudgum_prod_flow.data.remote.dto.D2CRequestDto>>
+
+    @retrofit2.http.GET("ops/d2c-requests/{id}")
+    suspend fun getD2CRequest(
+        @Path("id") id: String,
+    ): Response<com.example.gudgum_prod_flow.data.remote.dto.D2CRequestDto>
+
+    @retrofit2.http.PATCH("ops/d2c-requests/{id}")
+    suspend fun editD2CRequest(
+        @Path("id") id: String,
+        @Body request: com.example.gudgum_prod_flow.data.remote.dto.CreateD2CRequestPayload,
+    ): Response<Unit>
+
+    @DELETE("ops/d2c-requests/{id}")
+    suspend fun cancelD2CRequest(
+        @Path("id") id: String,
+    ): Response<Unit>
+
+    @retrofit2.http.GET("ops/finished-goods-available")
+    suspend fun getFinishedGoodsAvailable(): Response<List<com.example.gudgum_prod_flow.data.remote.dto.FinishedGoodsAvailableRow>>
+
+    @retrofit2.http.GET("ops/d2c-channels")
+    suspend fun getD2CChannels(): Response<List<String>>
 }

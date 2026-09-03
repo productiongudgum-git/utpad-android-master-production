@@ -153,6 +153,38 @@ interface SupabaseApiService {
         @Header("Prefer") prefer: String = "return=minimal",
     ): Response<Unit>
 
+    /** Lookup production batches by (batch_code, batch_number). One batch_code+batch_number
+     *  can map to multiple rows if a single batch run produced multiple flavours; the
+     *  Update Inventory flow lets the worker pick which flavour to top up. */
+    @GET("rest/v1/production_batches")
+    suspend fun findProductionBatchByCodeNumber(
+        @Query("batch_code")   batchCode: String,    // "eq.{code}"
+        @Query("batch_number") batchNumber: String,  // "eq.{number}"
+        @Query("select") select: String = "id,batch_code,batch_number,flavor_id,flavor:gg_flavors!production_batches_flavor_id_fkey(id,name)",
+        @Query("order") order: String = "flavor(name).asc",
+    ): Response<List<com.example.gudgum_prod_flow.data.remote.dto.BatchLookupDto>>
+
+    /** Sum of boxes packed so far for a specific production batch (every row, all dates). */
+    @GET("rest/v1/packing_sessions")
+    suspend fun getPackingBoxesForBatch(
+        @Query("production_batch_id") productionBatchId: String,  // "eq.{id}"
+        @Query("select") select: String = "boxes_packed",
+    ): Response<List<com.example.gudgum_prod_flow.data.remote.dto.PackingSessionBoxesDto>>
+
+    /** All packing sessions, grouped (client-side) by flavor_id for the finished-goods view. */
+    @GET("rest/v1/packing_sessions")
+    suspend fun getAllPackingSessionBoxes(
+        @Query("select") select: String = "flavor_id,boxes_packed",
+        @Query("limit") limit: Int = 100000,
+    ): Response<List<com.example.gudgum_prod_flow.data.remote.dto.FlavorBoxesRow>>
+
+    /** All dispatch events, grouped (client-side) by sku_id for finished-goods net. */
+    @GET("rest/v1/dispatch_events")
+    suspend fun getAllDispatchEventBoxes(
+        @Query("select") select: String = "sku_id,boxes_dispatched",
+        @Query("limit") limit: Int = 100000,
+    ): Response<List<com.example.gudgum_prod_flow.data.remote.dto.FlavorDispatchRow>>
+
     // ── Dispatch Events (dispatch_events) ──────────────────────────
     @POST("rest/v1/dispatch_events")
     suspend fun insertDispatchEvent(

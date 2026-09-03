@@ -171,6 +171,8 @@ fun PackingScreen(
                     1 -> PackingStatusStep(
                         selectedStatus = selectedPackingStatus,
                         onStatusSelected = viewModel::onPackingStatusSelected,
+                        onUpdateInventory = { onNavigateToRoute(AppRoute.UpdateInventory) },
+                        onViewInventory   = { onNavigateToRoute(AppRoute.FinishedGoodsInventory) },
                     )
 
                     // ── Step 2: Batch selection ───────────────────────────────
@@ -297,6 +299,8 @@ fun PackingScreen(
 private fun PackingStatusStep(
     selectedStatus: PackingStatus?,
     onStatusSelected: (PackingStatus) -> Unit,
+    onUpdateInventory: () -> Unit,
+    onViewInventory: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
@@ -318,6 +322,23 @@ private fun PackingStatusStep(
             description = "Worker has partially packed this batch",
             selected = selectedStatus == PackingStatus.Partial,
             onClick = { onStatusSelected(PackingStatus.Partial) },
+        )
+
+        // Inventory actions — not part of the wizard flow. Tapping navigates away
+        // to the dedicated sub-screens; selected is always false since these never
+        // change wizard state.
+        PackingStatusCard(
+            title = "Update Inventory",
+            description = "Add boxes to an existing batch (top-up packing)",
+            selected = false,
+            onClick = onUpdateInventory,
+        )
+
+        PackingStatusCard(
+            title = "View Inventory",
+            description = "Per-flavour finished-goods boxes available",
+            selected = false,
+            onClick = onViewInventory,
         )
     }
 }

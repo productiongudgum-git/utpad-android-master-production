@@ -9,4 +9,7 @@ object AppRoute {
     const val Dispatch = "dispatch"
     const val Returns = "returns"
     const val ModuleSelector = "module_selector"
+    // Packing-side inventory sub-screens (gated by 'packing' module permission).
+    const val UpdateInventory       = "update_inventory"
+    const val FinishedGoodsInventory = "finished_goods_inventory"
 }

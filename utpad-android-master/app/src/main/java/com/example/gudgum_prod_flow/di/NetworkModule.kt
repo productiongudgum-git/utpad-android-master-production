@@ -2,6 +2,7 @@ package com.example.gudgum_prod_flow.di
 
 import com.example.gudgum_prod_flow.BuildConfig
 import com.example.gudgum_prod_flow.data.remote.api.AuthApiService
+import com.example.gudgum_prod_flow.data.remote.api.OperationsApiService
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
 import dagger.Provides
@@ -59,5 +60,11 @@ object NetworkModule {
     @Singleton
     fun provideAuthApiService(retrofit: Retrofit): AuthApiService {
         return retrofit.create(AuthApiService::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideOperationsApiService(retrofit: Retrofit): OperationsApiService {
+        return retrofit.create(OperationsApiService::class.java)
     }
 }

@@ -31,12 +31,13 @@ class SyncWorker @AssistedInject constructor(
 
             for (event in pendingEvents) {
                 val success = when (event.module) {
-                    "production" -> syncProductionBatch(event.payloadJson, event.batchCode, event.workerId)
-                    "packing"    -> syncPackingSession(event.payloadJson, event.batchCode, event.workerId)
-                    "dispatch"   -> syncDispatchEvents(event.payloadJson, event.workerId)
-                    "inwarding"  -> syncInwardEvent(event.payloadJson, event.workerId)
-                    "returns"    -> syncReturnEvent(event.payloadJson, event.workerId)
-                    else         -> syncLegacyOpsEvent(event)
+                    "production"     -> syncProductionBatch(event.payloadJson, event.batchCode, event.workerId)
+                    "packing"        -> syncPackingSession(event.payloadJson, event.batchCode, event.workerId)
+                    "packing_topup"  -> syncPackingTopUp(event.payloadJson, event.batchCode, event.workerId)
+                    "dispatch"       -> syncDispatchEvents(event.payloadJson, event.workerId)
+                    "inwarding"      -> syncInwardEvent(event.payloadJson, event.workerId)
+                    "returns"        -> syncReturnEvent(event.payloadJson, event.workerId)
+                    else             -> syncLegacyOpsEvent(event)
                 }
 
                 if (success) {
@@ -121,6 +122,34 @@ class SyncWorker @AssistedInject constructor(
         if (rows.isNotEmpty()) {
             runCatching { SupabaseApiClient.api.insertProductionBatchIngredients(rows) }
         }
+    }
+
+    /**
+     * Top-up packing rows always INSERT a fresh row — never find-then-update.
+     * Each invocation adds boxes to the batch and re-fires the ziplock auto-deduction
+     * trigger, so two top-ups of 10 boxes stack into +20 boxes (not overwrite to 10).
+     */
+    private suspend fun syncPackingTopUp(payloadJson: String, batchCode: String, workerId: String): Boolean {
+        return try {
+            val payload = JSONObject(payloadJson)
+            val flavorId = if (payload.isNull("flavor_id")) null else payload.getString("flavor_id")
+            val sessionDate = payload.getString("session_date")
+            val unitsPacked = if (payload.isNull("units_packed")) null else payload.optInt("units_packed")
+            val productionBatchId = if (payload.isNull("production_batch_id")) null else payload.optString("production_batch_id")
+            val request = SubmitPackingSessionRequest(
+                batchCode         = batchCode,
+                flavorId          = flavorId,
+                sessionDate       = sessionDate,
+                workerId          = workerId,
+                boxesPacked       = payload.getInt("boxes_packed"),
+                kgsPacked         = null,
+                unitsPacked       = unitsPacked,
+                productionBatchId = productionBatchId,
+                status            = payload.optString("status", "topup"),
+            )
+            val resp = SupabaseApiClient.api.insertPackingSession(request)
+            resp.isSuccessful || resp.code() == 201
+        } catch (e: Exception) { false }
     }
 
     private suspend fun syncPackingSession(payloadJson: String, batchCode: String, workerId: String): Boolean {
