@@ -30,6 +30,14 @@ class PackingRepository @Inject constructor(
     fun getActiveFlavors(): Flow<List<CachedFlavorEntity>> = flavorDao.getActiveFlavors()
 
     /**
+     * Box formats a batch of [baseFlavorId] can be packed into: the standard
+     * format first, then any packing variants. A single-element result means
+     * the flavour has no variants and the packer is never asked to choose.
+     */
+    suspend fun getPackFormats(baseFlavorId: String): List<CachedFlavorEntity> =
+        withContext(Dispatchers.IO) { flavorDao.getPackFormatsFor(baseFlavorId) }
+
+    /**
      * Returns all open production batches joined with their packing sessions.
      * Used to derive which batches still need packing.
      *

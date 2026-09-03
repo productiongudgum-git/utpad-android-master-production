@@ -13,7 +13,24 @@ data class FlavorDto(
     @SerialName("recipe_id") val recipeId: String? = null,
     @SerialName("yield_threshold") val yieldThreshold: Double? = null,
     @SerialName("shelf_life_days") val shelfLifeDays: Int? = null,
-)
+    /** Gums in one box of this flavour. Defaults to the pre-variant constant. */
+    @SerialName("units_per_box") val unitsPerBox: Int = DEFAULT_UNITS_PER_BOX,
+    /** Set when this row is a packing variant of another flavour. */
+    @SerialName("parent_flavor_id") val parentFlavorId: String? = null,
+) {
+    /** Variants are packed, never produced — production runs against the parent. */
+    val isPackingVariant: Boolean get() = parentFlavorId != null
+}
+
+/**
+ * Gums per box when a flavour does not say otherwise.
+ *
+ * Before packing variants this was hardcoded at each call site. It is still the
+ * right fallback — it matches the `units_per_box` default in ops-api migration
+ * 0008 — but it must never be used where a real flavour is in hand: a variant
+ * packed 10 to a box would then report 50% more units than it holds.
+ */
+const val DEFAULT_UNITS_PER_BOX = 15
 
 // ── Recipe Lines (BOM) — recipe_lines joined with gg_ingredients ──
 @Serializable

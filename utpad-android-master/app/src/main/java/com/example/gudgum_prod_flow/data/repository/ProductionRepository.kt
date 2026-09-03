@@ -35,7 +35,10 @@ class ProductionRepository @Inject constructor(
         private const val TAG = "ProductionRepository"
     }
 
-    fun getActiveFlavors(): Flow<List<CachedFlavorEntity>> = flavorDao.getActiveFlavors()
+    /** Base flavours only. A packing variant is a box format, not something you
+     *  make — a batch is produced as the parent and the format is chosen while
+     *  packing, so offering a variant here would strand the batch unpackable. */
+    fun getActiveFlavors(): Flow<List<CachedFlavorEntity>> = flavorDao.getActiveBaseFlavors()
 
     fun getRecipeLines(flavorId: String): Flow<List<CachedRecipeLineEntity>> =
         recipeLineDao.getByRecipeId(flavorId)
@@ -57,6 +60,8 @@ class ProductionRepository @Inject constructor(
                         active = it.active,
                         yieldThreshold = it.yieldThreshold,
                         shelfLifeDays = it.shelfLifeDays,
+                        unitsPerBox = it.unitsPerBox,
+                        parentFlavorId = it.parentFlavorId,
                     )
                 })
             } else {

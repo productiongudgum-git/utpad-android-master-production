@@ -7,10 +7,12 @@ import retrofit2.http.*
 interface SupabaseApiService {
 
     // ── Flavors / SKUs (gg_flavors) ────────────────────────────────
+    /** Every active flavour, packing variants included — a variant is a sellable
+     *  good with its own stock, so Packing and Dispatch both need to see it. */
     @GET("rest/v1/gg_flavors")
     suspend fun getGgFlavors(
         @Query("active") active: String = "eq.true",
-        @Query("select") select: String = "id,name,code,active,recipe_id,yield_threshold,shelf_life_days",
+        @Query("select") select: String = "id,name,code,active,recipe_id,yield_threshold,shelf_life_days,units_per_box,parent_flavor_id",
         @Query("order") order: String = "name.asc",
     ): Response<List<FlavorDto>>
 
