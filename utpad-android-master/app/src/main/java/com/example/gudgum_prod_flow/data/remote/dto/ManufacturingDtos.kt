@@ -104,6 +104,7 @@ data class FlavorJoinDto(
     val id: String? = null,
     val name: String? = null,
     val code: String? = null,
+    @SerialName("units_per_box") val unitsPerBox: Int? = null,
 )
 
 // ── Packing Sessions (packing_sessions) ────────────────────────────
@@ -208,7 +209,29 @@ data class InvoiceItemJson(
     @SerialName("quantity_boxes") val quantityBoxes: Int? = null,
     @SerialName("packed_boxes") val packedBoxes: Int = 0,
     @SerialName("dispatched") val dispatched: Boolean = false,
-)
+    /**
+     * Gums per box as recorded when the invoice was raised. The web invoice
+     * form writes this alongside the flavour so an old invoice keeps reading
+     * the way it was raised even if the variant's box count is corrected later.
+     * Absent on invoices created before packing variants existed.
+     */
+    @SerialName("units_per_box") val unitsPerBox: Int? = null,
+) {
+    /**
+     * Boxes this line asks for.
+     *
+     * quantity_boxes is what the web app writes and what dispatch counts in,
+     * so it wins whenever present. The units fallback covers legacy lines and
+     * now divides by the line's own box count, so a variant line is not
+     * converted at the standard 15 and under-picked by a third.
+     */
+    val resolvedBoxes: Int get() =
+        if (quantityBoxes != null && quantityBoxes > 0) quantityBoxes
+        else Math.ceil(quantityUnits / (unitsPerBox ?: DEFAULT_UNITS_PER_BOX).toDouble()).toInt()
+
+    /** Boxes still to pack before this line is satisfied. */
+    val remainingBoxes: Int get() = maxOf(0, resolvedBoxes - packedBoxes)
+}
 
 @Serializable
 data class InvoiceDto(
@@ -233,9 +256,21 @@ data class InvoiceItemDto(
     val packedBoxes: Int = 0,
     val flavor: FlavorJoinDto? = null,
 ) {
+    /**
+     * Boxes this line asks for.
+     *
+     * quantity_boxes is what the web app writes and what the whole dispatch
+     * flow counts in, so it wins whenever present. The units fallback is for
+     * legacy lines that only carry quantity_units; it now divides by the
+     * line's own flavour box count, so a packing variant is not silently
+     * converted at the standard 15 and under-picked by a third.
+     */
     val resolvedBoxes: Int get() =
         if (quantityBoxes != null && quantityBoxes > 0) quantityBoxes
-        else Math.ceil(quantityUnits / 15.0).toInt()
+        else Math.ceil(quantityUnits / unitsPerBox.toDouble()).toInt()
+
+    /** This line's gums-per-box, falling back to the pre-variant constant. */
+    val unitsPerBox: Int get() = flavor?.unitsPerBox ?: DEFAULT_UNITS_PER_BOX
 
     /** Boxes still needed to reach full packing for this flavor. */
     val remainingBoxes: Int get() = maxOf(0, resolvedBoxes - packedBoxes)

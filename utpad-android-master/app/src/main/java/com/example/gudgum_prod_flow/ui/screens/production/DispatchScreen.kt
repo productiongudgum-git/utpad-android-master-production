@@ -92,11 +92,7 @@ private fun daysSince(isoString: String?): Int {
     } catch (_: Exception) { 0 }
 }
 
-private fun InvoiceDto.totalBoxes(): Int =
-    items.sumOf { item ->
-        if (item.quantityBoxes != null && item.quantityBoxes > 0) item.quantityBoxes
-        else Math.ceil(item.quantityUnits / 15.0).toInt()
-    }
+private fun InvoiceDto.totalBoxes(): Int = items.sumOf { it.resolvedBoxes }
 
 private fun InvoiceDto.totalPackedBoxes(): Int = items.sumOf { it.packedBoxes }
 
@@ -680,8 +676,7 @@ private fun BlueConfirmContent(
                         invoice.items
                             .groupBy { it.flavorId }
                             .forEach { (_, group) ->
-                                val needed = group.mapNotNull { it.quantityBoxes }.takeIf { it.isNotEmpty() }?.sum()
-                                    ?: Math.ceil(group.sumOf { it.quantityUnits } / 15.0).toInt()
+                                val needed = group.sumOf { it.resolvedBoxes }
                                 val packed = group.sumOf { it.packedBoxes }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),

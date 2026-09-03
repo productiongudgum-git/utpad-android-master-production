@@ -18,8 +18,8 @@ android {
         applicationId = "com.gudgum.invmgt"
         minSdk = 24
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.0.11"
+        versionCode = 13
+        versionName = "1.0.12"
         buildConfigField("String", "OPS_API_BASE_URL", "\"https://utpad-ops-api-seven.vercel.app/api/v1/\"")
         buildConfigField("String", "SUPABASE_URL", "\"https://hafaxgyaxmypmmpbemos.supabase.co/\"")
         buildConfigField("String", "SUPABASE_API_URL", "\"https://hafaxgyaxmypmmpbemos.supabase.co\"")

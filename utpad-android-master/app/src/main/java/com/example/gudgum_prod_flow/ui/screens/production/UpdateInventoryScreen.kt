@@ -35,6 +35,8 @@ fun UpdateInventoryScreen(
     val resolved      by viewModel.resolved.collectAsState()
     val currentBoxes  by viewModel.currentBoxes.collectAsState()
     val addBoxes      by viewModel.addBoxes.collectAsState()
+    val packFormats       by viewModel.packFormats.collectAsState()
+    val selectedPackFormat by viewModel.selectedPackFormat.collectAsState()
     val busy          by viewModel.busy.collectAsState()
     val error         by viewModel.error.collectAsState()
     val success       by viewModel.success.collectAsState()
@@ -187,6 +189,43 @@ fun UpdateInventoryScreen(
                             )
                         }
                     }
+                    // Box format — shown only when this flavour has packing
+                    // variants, so a single-format flavour looks unchanged.
+                    if (packFormats.size > 1) {
+                        Text(
+                            "HOW ARE THESE PACKED?",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = UtpadTextSecondary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        packFormats.forEach { format ->
+                            val isSelected = selectedPackFormat?.id == format.id
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) UtpadPrimary.copy(alpha = 0.12f) else UtpadSurface,
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { viewModel.onPackFormatSelected(format) },
+                            ) {
+                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        if (format.isPackingVariant) format.name else "Standard — ${format.name}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isSelected) UtpadPrimary else UtpadTextPrimary,
+                                    )
+                                    Text(
+                                        "${format.unitsPerBox} gums per box",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = UtpadTextSecondary,
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                    }
+
                     OutlinedTextField(
                         value = addBoxes,
                         onValueChange = viewModel::onAddBoxesChange,

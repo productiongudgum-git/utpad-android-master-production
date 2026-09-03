@@ -119,12 +119,7 @@ class DispatchViewModel @Inject constructor(
     private fun invoiceColumn(invoice: InvoiceDto): InvoiceColumn {
         val items = invoice.items
         if (items.isEmpty()) return InvoiceColumn.RED
-        val allFullyPacked = items.all { item ->
-            val needed = if (item.quantityBoxes != null && item.quantityBoxes > 0)
-                item.quantityBoxes
-            else Math.ceil(item.quantityUnits / 15.0).toInt()
-            item.packedBoxes >= needed
-        }
+        val allFullyPacked = items.all { item -> item.packedBoxes >= item.resolvedBoxes }
         val anyPacked = items.any { it.packedBoxes > 0 }
         return when {
             allFullyPacked -> InvoiceColumn.BLUE
@@ -345,12 +340,8 @@ class DispatchViewModel @Inject constructor(
             }
 
             // Invoice is fully packed only when every flavor reaches its target
-            val allFullyPacked = updatedItems.isNotEmpty() && updatedItems.all { item ->
-                val needed = if (item.quantityBoxes != null && item.quantityBoxes > 0)
-                    item.quantityBoxes
-                else Math.ceil(item.quantityUnits / 15.0).toInt()
-                item.packedBoxes >= needed
-            }
+            val allFullyPacked = updatedItems.isNotEmpty() &&
+                updatedItems.all { item -> item.packedBoxes >= item.resolvedBoxes }
 
             // isDispatched only meaningful when fully packed
             val finalIsPacked = allFullyPacked

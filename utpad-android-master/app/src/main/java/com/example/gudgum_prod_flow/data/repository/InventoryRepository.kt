@@ -3,6 +3,7 @@ package com.example.gudgum_prod_flow.data.repository
 import android.util.Log
 import com.example.gudgum_prod_flow.data.local.dao.CachedFlavorDao
 import com.example.gudgum_prod_flow.data.local.dao.PendingOperationEventDao
+import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
 import com.example.gudgum_prod_flow.data.local.entity.PendingOperationEventEntity
 import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
 import com.example.gudgum_prod_flow.data.remote.dto.BatchLookupDto
@@ -70,14 +71,27 @@ class InventoryRepository @Inject constructor(
         }
 
     /**
+     * Box formats a batch of [baseFlavorId] can be topped up in — the standard
+     * format first, then any packing variants. Same list the packing wizard uses.
+     */
+    suspend fun getPackFormats(baseFlavorId: String): List<CachedFlavorEntity> =
+        withContext(Dispatchers.IO) { flavorDao.getPackFormatsFor(baseFlavorId) }
+
+    /**
      * Add N boxes to this batch as a fresh packing_sessions row.
      * Status 'topup' so finance/dashboards can split top-ups from normal sessions if needed.
+     *
+     * [flavorId] is the format actually packed — the batch's own flavour for a
+     * standard top-up, or a packing variant's. It decides which stock line the
+     * boxes land on and which monocarton the materials trigger deducts, so it
+     * must not be assumed to equal the production batch's flavour.
      */
     suspend fun submitTopUpBoxes(
         batchCode: String,
         flavorId: String,
         productionBatchId: String,
         boxes: Int,
+        unitsPerBox: Int,
         isOnline: Boolean,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val today    = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -91,7 +105,7 @@ class InventoryRepository @Inject constructor(
                     sessionDate       = today,
                     workerId          = workerId,
                     boxesPacked       = boxes,
-                    unitsPacked       = boxes * 15,
+                    unitsPacked       = boxes * unitsPerBox,
                     productionBatchId = productionBatchId,
                     status            = "topup",
                 )
@@ -121,7 +135,7 @@ class InventoryRepository @Inject constructor(
                             put("batch_code", batchCode)
                             put("flavor_id", flavorId)
                             put("boxes_packed", boxes)
-                            put("units_packed", boxes * 15)
+                            put("units_packed", boxes * unitsPerBox)
                             put("session_date", today)
                             put("production_batch_id", productionBatchId)
                             put("status", "topup")

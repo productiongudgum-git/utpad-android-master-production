@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
 import com.example.gudgum_prod_flow.data.local.entity.CachedRecipeLineEntity
 import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
+import com.example.gudgum_prod_flow.data.remote.dto.DEFAULT_UNITS_PER_BOX
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchIngredientRow
 import com.example.gudgum_prod_flow.data.repository.ProductionRepository
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
@@ -23,7 +24,14 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
-data class FlavorProfile(val id: String, val name: String, val code: String, val recipeId: String?)
+data class FlavorProfile(
+    val id: String,
+    val name: String,
+    val code: String,
+    val recipeId: String?,
+    /** Standard gums per box for this flavour — packing variants may differ. */
+    val unitsPerBox: Int = DEFAULT_UNITS_PER_BOX,
+)
 
 data class RecipeIngredient(
     val ingredientId: String,
@@ -122,6 +130,7 @@ class ProductionViewModel @Inject constructor(
                         name = it.name,
                         code = it.code,
                         recipeId = it.recipeId,
+                        unitsPerBox = it.unitsPerBox,
                     )
                 }
             }
@@ -257,7 +266,11 @@ class ProductionViewModel @Inject constructor(
             // Convert all ingredient quantities to kg before computing totals
             val totalInputKg = _recipe.value.sumOf { ingredientToKg(it) }
             val expectedBoxes = (totalInputKg / 0.021).toInt()
-            val expectedUnits = expectedBoxes * 15
+            // Production always runs against a base flavour, so this is that
+            // flavour's standard box count. If the batch is later split across
+            // packing variants the figure becomes a planning estimate — the
+            // boxes actually produced depend on the formats the packer chooses.
+            val expectedUnits = expectedBoxes * flavor.unitsPerBox
 
             // Re-query batch count at submission time for accuracy
             val existingCount = repository.countBatchesForCodeAndFlavor(batchCode, flavor.id)

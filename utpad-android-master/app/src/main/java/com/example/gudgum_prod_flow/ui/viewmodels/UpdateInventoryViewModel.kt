@@ -2,8 +2,10 @@ package com.example.gudgum_prod_flow.ui.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
 import com.example.gudgum_prod_flow.data.network.ConnectivityObserver
 import com.example.gudgum_prod_flow.data.remote.dto.BatchLookupDto
+import com.example.gudgum_prod_flow.data.remote.dto.DEFAULT_UNITS_PER_BOX
 import com.example.gudgum_prod_flow.data.repository.InventoryRepository
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -48,6 +50,15 @@ class UpdateInventoryViewModel @Inject constructor(
 
     private val _addBoxes = MutableStateFlow("")
     val addBoxes: StateFlow<String> = _addBoxes.asStateFlow()
+
+    // Box formats the resolved batch can be topped up in — the standard format
+    // plus any packing variants. One entry means no choice to make, and the
+    // AddBoxes step looks exactly as it did before variants existed.
+    private val _packFormats = MutableStateFlow<List<CachedFlavorEntity>>(emptyList())
+    val packFormats: StateFlow<List<CachedFlavorEntity>> = _packFormats.asStateFlow()
+
+    private val _selectedPackFormat = MutableStateFlow<CachedFlavorEntity?>(null)
+    val selectedPackFormat: StateFlow<CachedFlavorEntity?> = _selectedPackFormat.asStateFlow()
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -113,9 +124,20 @@ class UpdateInventoryViewModel @Inject constructor(
                 onSuccess = { _currentBoxes.value = it },
                 onFailure = { _currentBoxes.value = 0 },
             )
+            // Which box formats this batch can be topped up in. Read from the
+            // Room cache so the flow still works offline; an empty result just
+            // means no variants are known and the standard format is used.
+            val formats = runCatching { repo.getPackFormats(match.flavorId) }
+                .getOrDefault(emptyList())
+            _packFormats.value = formats
+            _selectedPackFormat.value = formats.firstOrNull()
             _step.value = UpdateInventoryStep.AddBoxes
             _busy.value = false
         }
+    }
+
+    fun onPackFormatSelected(format: CachedFlavorEntity) {
+        _selectedPackFormat.value = format
     }
 
     /** Step 2 → 3. Writes the top-up row. */
@@ -131,19 +153,28 @@ class UpdateInventoryViewModel @Inject constructor(
         _error.value = null
         viewModelScope.launch {
             val online = connectivity.isOnline()
+            // Top up the format the worker actually packed. For a variant this
+            // is the variant's own flavour, so the boxes land on its stock line
+            // rather than inflating the parent's.
+            val format = _selectedPackFormat.value
             repo.submitTopUpBoxes(
                 batchCode         = match.batchCode,
-                flavorId          = match.flavorId,
+                flavorId          = format?.id ?: match.flavorId,
                 productionBatchId = match.id,
                 boxes             = toAdd,
+                unitsPerBox       = format?.unitsPerBox ?: DEFAULT_UNITS_PER_BOX,
                 isOnline          = online,
             ).fold(
                 onSuccess = {
+                    // Only a same-format top-up adds to the count we showed; a
+                    // variant starts from its own separate total.
+                    val sameFormat = format == null || format.id == match.flavorId
                     val newTotal = _currentBoxes.value + toAdd
-                    _success.value = if (online)
-                        "Added $toAdd boxes. Batch now at $newTotal boxes."
-                    else
-                        "Saved offline. $toAdd boxes will sync when back online."
+                    _success.value = when {
+                        !online -> "Saved offline. $toAdd boxes will sync when back online."
+                        sameFormat -> "Added $toAdd boxes. Batch now at $newTotal boxes."
+                        else -> "Added $toAdd boxes of ${format.name}."
+                    }
                     _busy.value = false
                     _step.value = UpdateInventoryStep.Done
                 },
@@ -164,6 +195,8 @@ class UpdateInventoryViewModel @Inject constructor(
         _resolved.value = null
         _currentBoxes.value = 0
         _addBoxes.value = ""
+        _packFormats.value = emptyList()
+        _selectedPackFormat.value = null
         _error.value = null
         _success.value = null
     }

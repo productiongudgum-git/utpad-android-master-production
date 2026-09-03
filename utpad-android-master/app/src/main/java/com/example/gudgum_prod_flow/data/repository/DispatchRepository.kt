@@ -1,9 +1,11 @@
 package com.example.gudgum_prod_flow.data.repository
 
 import android.util.Log
+import com.example.gudgum_prod_flow.data.local.dao.CachedFlavorDao
 import com.example.gudgum_prod_flow.data.local.dao.PendingOperationEventDao
 import com.example.gudgum_prod_flow.data.local.entity.PendingOperationEventEntity
 import com.example.gudgum_prod_flow.data.remote.api.SupabaseApiClient
+import com.example.gudgum_prod_flow.data.remote.dto.DEFAULT_UNITS_PER_BOX
 import com.example.gudgum_prod_flow.data.remote.dto.DispatchedBatchDto
 import com.example.gudgum_prod_flow.data.remote.dto.GgCustomerDto
 import com.example.gudgum_prod_flow.data.remote.dto.InvoiceDto
@@ -22,11 +24,29 @@ import javax.inject.Singleton
 @Singleton
 class DispatchRepository @Inject constructor(
     private val pendingDao: PendingOperationEventDao,
+    private val flavorDao: CachedFlavorDao,
 ) {
     private val api = SupabaseApiClient.api
 
     companion object {
         private const val TAG = "DispatchRepository"
+    }
+
+    /**
+     * Gums per box for a flavour, from the local catalogue cache.
+     *
+     * Dispatch works entirely in boxes — that is what stock, FIFO and invoices
+     * are counted in — so this only feeds the informational unit figures. It
+     * still has to be per-flavour: a packing variant is its own flavour here,
+     * and reporting its boxes at 15 gums would overstate what left the factory.
+     *
+     * Falls back to the default when the flavour is not cached, which is the
+     * behaviour every one of these call sites had before variants existed.
+     */
+    private suspend fun unitsPerBox(flavorId: String?): Int {
+        if (flavorId.isNullOrBlank()) return DEFAULT_UNITS_PER_BOX
+        return runCatching { flavorDao.getById(flavorId)?.unitsPerBox }
+            .getOrNull() ?: DEFAULT_UNITS_PER_BOX
     }
 
     suspend fun getDispatchedBatches(): Result<List<DispatchedBatchDto>> = withContext(Dispatchers.IO) {
@@ -87,6 +107,10 @@ class DispatchRepository @Inject constructor(
                 .groupBy { it.batchCode }
                 .mapValues { (_, events) -> events.sumOf { it.boxesDispatched } }
 
+            // This flavour's own box count — a packing variant is a distinct
+            // flavour here, and its boxes hold fewer gums than the parent's.
+            val perBox = unitsPerBox(flavorId)
+
             sessions.groupBy { it.batchCode }
                 .mapNotNull { (batchCode, batchSessions) ->
                     val totalPacked = batchSessions.sumOf { it.boxesPacked }
@@ -100,7 +124,7 @@ class DispatchRepository @Inject constructor(
                         flavorId = flavorId,
                         productionDate = oldestSessionDate,
                         expectedBoxes = available,
-                        expectedUnits = available * 15,
+                        expectedUnits = available * perBox,
                     )
                 }
                 .sortedBy { it.productionDate }
@@ -131,6 +155,9 @@ class DispatchRepository @Inject constructor(
         withContext(Dispatchers.IO) {
             if (isOnline) {
                 for (result in allocations) {
+                    // Per flavour, since an invoice can mix a base flavour and
+                    // one of its packing variants on separate lines.
+                    val perBox = unitsPerBox(result.flavorId)
                     for (alloc in result.allocations) {
                         if (alloc.unitsToTake <= 0) continue
                         val request = SubmitDispatchEventRequest(
@@ -142,7 +169,7 @@ class DispatchRepository @Inject constructor(
                             dispatchDate = dispatchDate,
                             workerId = workerId,
                             invoiceId = invoiceId,
-                            unitsDispatched = alloc.unitsToTake * 15,
+                            unitsDispatched = alloc.unitsToTake * perBox,
                             flavorId = result.flavorId,
                             isPacked = isPacked,
                             isDispatched = isDispatched,
