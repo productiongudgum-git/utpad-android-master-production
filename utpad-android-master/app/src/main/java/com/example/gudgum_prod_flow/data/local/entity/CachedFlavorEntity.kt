@@ -12,4 +12,11 @@ data class CachedFlavorEntity(
     val active: Boolean = true,
     val yieldThreshold: Double? = null,
     val shelfLifeDays: Int? = null,
-)
+    /** Gums in one box of this flavour. 15 for everything before packing variants. */
+    val unitsPerBox: Int = 15,
+    /** Set when this row is a packing variant of another flavour; null for a base flavour. */
+    val parentFlavorId: String? = null,
+) {
+    /** A variant exists only as a box format of its parent — it is never produced. */
+    val isPackingVariant: Boolean get() = parentFlavorId != null
+}

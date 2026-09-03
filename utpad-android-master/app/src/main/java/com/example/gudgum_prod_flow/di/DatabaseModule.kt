@@ -3,6 +3,7 @@ package com.example.gudgum_prod_flow.di
 import android.content.Context
 import androidx.room.Room
 import com.example.gudgum_prod_flow.data.local.GudGumDatabase
+import com.example.gudgum_prod_flow.data.local.GudGumMigrations
 import com.example.gudgum_prod_flow.data.local.dao.*
 import dagger.Module
 import dagger.Provides
@@ -25,7 +26,11 @@ object DatabaseModule {
             GudGumDatabase::class.java,
             "gudgum_database"
         )
-            .fallbackToDestructiveMigration() // Dev only — replace with proper migration before release
+            // No destructive fallback. This database holds pending_operation_events
+            // — submissions a worker made offline that SyncWorker has not replayed
+            // yet — so wiping it on a version bump would silently destroy real work.
+            // Every schema change needs a migration in GudGumMigrations instead.
+            .addMigrations(*GudGumMigrations.ALL)
             .build()
     }
 

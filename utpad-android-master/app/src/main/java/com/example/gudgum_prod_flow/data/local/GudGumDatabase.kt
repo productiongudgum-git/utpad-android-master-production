@@ -13,7 +13,11 @@ import com.example.gudgum_prod_flow.data.local.entity.*
         CachedBatchEntity::class,
         CachedIngredientEntity::class,
     ],
-    version = 3,
+    // v4 adds cached_flavors.unitsPerBox / .parentFlavorId for packing variants.
+    // Bumping this REQUIRES a matching entry in GudGumMigrations — this database
+    // holds the offline submission queue, so a destructive fallback would throw
+    // away work that was never sent to the server.
+    version = 4,
     exportSchema = true,
 )
 abstract class GudGumDatabase : RoomDatabase() {
