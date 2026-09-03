@@ -63,6 +63,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
+import com.example.gudgum_prod_flow.data.remote.dto.DEFAULT_UNITS_PER_BOX
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchWithPackingDto
 import com.example.gudgum_prod_flow.ui.components.SuccessOverlay
 import com.example.gudgum_prod_flow.ui.navigation.AppRoute
@@ -100,8 +102,13 @@ fun PackingScreen(
     val packingDate by viewModel.packingDate.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
     val currentStep by viewModel.currentWizardStep.collectAsState()
+    val packFormats by viewModel.packFormats.collectAsState()
+    val selectedPackFormat by viewModel.selectedPackFormat.collectAsState()
 
-    val unitsPacked = boxesMade.toIntOrNull()?.let { it * 15 }
+    // Units follow the chosen box format, not a fixed 15 — a Lemon 10s box holds
+    // ten. Falls back to the default only while the format list is still loading.
+    val unitsPacked = boxesMade.toIntOrNull()
+        ?.let { it * (selectedPackFormat?.unitsPerBox ?: DEFAULT_UNITS_PER_BOX) }
 
     // True when the worker is on PATH B and selected a batch from the left (partial) column.
     // In this case step 3 shows the "is packing now complete?" status question.
@@ -213,6 +220,9 @@ fun PackingScreen(
                         showStatusQuestion = showStatusQuestion,
                         selectedFinalStatus = selectedFinalStatus,
                         onFinalStatusSelected = viewModel::onFinalStatusSelected,
+                        packFormats = packFormats,
+                        selectedPackFormat = selectedPackFormat,
+                        onPackFormatSelected = viewModel::onPackFormatSelected,
                     )
                 }
             }
@@ -573,6 +583,9 @@ private fun PackingOutputStep(
     showStatusQuestion: Boolean,
     selectedFinalStatus: PackingStatus?,
     onFinalStatusSelected: (PackingStatus) -> Unit,
+    packFormats: List<CachedFlavorEntity>,
+    selectedPackFormat: CachedFlavorEntity?,
+    onPackFormatSelected: (CachedFlavorEntity) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
@@ -628,6 +641,27 @@ private fun PackingOutputStep(
             }
         }
 
+        // Pack format — only asked when the flavour actually has variants.
+        // A flavour packed one way behaves exactly as it did before this existed.
+        if (packFormats.size > 1) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "HOW IS THIS BEING PACKED?",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = UtpadTextSecondary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                packFormats.forEach { format ->
+                    PackingStatusCard(
+                        title = if (format.isPackingVariant) format.name else "Standard — ${format.name}",
+                        description = "${format.unitsPerBox} gums per box",
+                        selected = selectedPackFormat?.id == format.id,
+                        onClick = { onPackFormatSelected(format) },
+                    )
+                }
+            }
+        }
+
         // Boxes packed + packing date card
         Card(
             shape = RoundedCornerShape(24.dp),
@@ -671,7 +705,8 @@ private fun PackingOutputStep(
                         color = UtpadPrimary.copy(alpha = 0.1f),
                     ) {
                         Text(
-                            text = "= $unitsPacked units ($boxesMade boxes × 15 gums/box)",
+                            text = "= $unitsPacked units ($boxesMade boxes × " +
+                                "${selectedPackFormat?.unitsPerBox ?: DEFAULT_UNITS_PER_BOX} gums/box)",
                             style = MaterialTheme.typography.bodySmall,
                             color = UtpadPrimary,
                             fontWeight = FontWeight.SemiBold,

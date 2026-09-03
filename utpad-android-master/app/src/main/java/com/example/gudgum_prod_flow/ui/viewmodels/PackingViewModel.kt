@@ -3,14 +3,19 @@ package com.example.gudgum_prod_flow.ui.viewmodels
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.gudgum_prod_flow.data.local.entity.CachedFlavorEntity
 import com.example.gudgum_prod_flow.data.remote.dto.ProductionBatchWithPackingDto
 import com.example.gudgum_prod_flow.data.remote.SupabaseRealtimeManager
+import com.example.gudgum_prod_flow.data.remote.dto.DEFAULT_UNITS_PER_BOX
 import com.example.gudgum_prod_flow.data.repository.PackingRepository
 import com.example.gudgum_prod_flow.data.session.WorkerIdentityStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -69,6 +74,25 @@ class PackingViewModel @Inject constructor(
     private val _selectedFinalStatus = MutableStateFlow<PackingStatus?>(null)
     val selectedFinalStatus: StateFlow<PackingStatus?> = _selectedFinalStatus.asStateFlow()
 
+    // ── Step 3 pack format ────────────────────────────────────────────────────
+    // The box formats this batch's flavour can be packed into: the standard
+    // format, plus any packing variants (e.g. Lemon 10s). One entry means the
+    // flavour has no variants and the worker is never asked to choose.
+    //
+    // The chosen format decides which flavour the packing_sessions row is
+    // written against, which is what keeps a 10-gum box out of the 15-gum
+    // stock line — they are different goods and must not net together.
+    private val _packFormats = MutableStateFlow<List<CachedFlavorEntity>>(emptyList())
+    val packFormats: StateFlow<List<CachedFlavorEntity>> = _packFormats.asStateFlow()
+
+    private val _selectedPackFormat = MutableStateFlow<CachedFlavorEntity?>(null)
+    val selectedPackFormat: StateFlow<CachedFlavorEntity?> = _selectedPackFormat.asStateFlow()
+
+    /** True only when there is a real choice to make — drives the step 3 picker. */
+    val hasPackFormatChoice: StateFlow<Boolean> = _packFormats
+        .map { it.size > 1 }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     // ── Step 3 inputs ─────────────────────────────────────────────────────────
     private val _boxesMade = MutableStateFlow("")
     val boxesMade: StateFlow<String> = _boxesMade.asStateFlow()
@@ -115,6 +139,37 @@ class PackingViewModel @Inject constructor(
         _selectedBatch.value = batch
         _isFromPartialList.value = fromPartialList
         _selectedFinalStatus.value = null
+        loadPackFormatsFor(batch)
+    }
+
+    /**
+     * Loads the box formats available for the selected batch and pre-selects the
+     * standard one, so a flavour with no variants behaves exactly as it did
+     * before: the worker sees no extra question and packs at the usual count.
+     *
+     * On a cache miss (fresh install, catalogue not synced yet) the list is left
+     * empty and submit falls back to the batch's own flavour — never blocking a
+     * packer who is offline in the factory.
+     */
+    private fun loadPackFormatsFor(batch: ProductionBatchWithPackingDto) {
+        val flavorId = batch.flavorId
+        if (flavorId.isNullOrBlank()) {
+            _packFormats.value = emptyList()
+            _selectedPackFormat.value = null
+            return
+        }
+        viewModelScope.launch {
+            val formats = runCatching { repository.getPackFormats(flavorId) }
+                .onFailure { Log.w(TAG, "Pack format lookup failed: ${it.message}") }
+                .getOrDefault(emptyList())
+            _packFormats.value = formats
+            // Standard format first (getPackFormatsFor orders base ahead of variants).
+            _selectedPackFormat.value = formats.firstOrNull()
+        }
+    }
+
+    fun onPackFormatSelected(format: CachedFlavorEntity) {
+        _selectedPackFormat.value = format
     }
 
     /** Called from the step 3 status question (only shown when isFromPartialList == true). */
@@ -157,6 +212,8 @@ class PackingViewModel @Inject constructor(
             _selectedBatch.value = null
             _isFromPartialList.value = false
             _selectedFinalStatus.value = null
+            _packFormats.value = emptyList()
+            _selectedPackFormat.value = null
             _batchesLoading.value = false
         }
     }
@@ -201,18 +258,33 @@ class PackingViewModel @Inject constructor(
             }
         }
 
-        val unitsPacked = boxes * 15
+        // ── Which box format was packed ───────────────────────────────────────
+        // The session is written against the CHOSEN format's flavour, not the
+        // batch's. For the standard format those are the same row; for a variant
+        // it is the variant's own flavour, which is what gives the variant a
+        // separate stock line and makes the packing-materials trigger deduct the
+        // variant's own monocarton.
+        //
+        // production_batch_id still points at the parent batch, so one batch can
+        // be split across formats and traceability back to the gum is unbroken.
+        val format      = _selectedPackFormat.value
+        val flavorId    = format?.id ?: batch.flavorId
+        val unitsPerBox = format?.unitsPerBox ?: DEFAULT_UNITS_PER_BOX
+        val unitsPacked = boxes * unitsPerBox
+
         Log.d(
             TAG,
             "submit: statusStr='$statusStr' batchCode=${batch.batchCode} " +
-                "productionBatchId=${batch.id} boxes=$boxes isFromPartialList=${_isFromPartialList.value}"
+                "productionBatchId=${batch.id} boxes=$boxes unitsPerBox=$unitsPerBox " +
+                "flavorId=$flavorId isVariant=${format?.isPackingVariant == true} " +
+                "isFromPartialList=${_isFromPartialList.value}"
         )
 
         _submitState.value = SubmitState.Loading
         viewModelScope.launch {
             val result = repository.submitPacking(
                 batchCode = batch.batchCode,
-                flavorId = batch.flavorId,
+                flavorId = flavorId,
                 boxesPacked = boxes,
                 unitsPacked = unitsPacked,
                 packingDate = _packingDate.value,
@@ -223,7 +295,7 @@ class PackingViewModel @Inject constructor(
             )
             result.onSuccess {
                 val batchLabel = batch.batchNumber?.let { "Batch $it" } ?: ""
-                val flavorLabel = batch.flavor?.name ?: ""
+                val flavorLabel = format?.name ?: batch.flavor?.name ?: ""
                 // Reset wizard state BEFORE setting Success so clear() doesn't overwrite the
                 // success message (both run on the same coroutine frame / main-thread dispatch).
                 clear()
@@ -242,6 +314,8 @@ class PackingViewModel @Inject constructor(
         _selectedBatch.value = null
         _isFromPartialList.value = false
         _selectedFinalStatus.value = null
+        _packFormats.value = emptyList()
+        _selectedPackFormat.value = null
         _completeBatches.value = emptyList()
         _partialBatches.value = emptyList()
         _unpackedBatches.value = emptyList()
